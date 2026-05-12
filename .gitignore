@@ -1,0 +1,17 @@
+node_modules
+dist
+.vite
+*.log
+.DS_Store
+
+# Rust / Tauri build artefacts
+src-tauri/target
+*.tsbuildinfo
+
+# Local design-tool artefacts (not part of the app)
+.design-cache
+.superpowers
+
+# Local Claude harness state
+.claude
+.mcp.json
