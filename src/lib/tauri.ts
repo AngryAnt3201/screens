@@ -69,6 +69,22 @@ export const embed = {
   async openDevtools() {
     return safeInvoke<void>('embed_devtools', {});
   },
+  /**
+   * Snap the embedded pane's pixels to disk at
+   * `~/.screens/projects/<slug>/screenshots/<screenId>.png`. Returns the
+   * `file://` URL of the resulting PNG, or `null` outside Tauri / on failure.
+   * `x/y/w/h` must be the live logical-pixel bounds of the webview container.
+   */
+  async capture(args: { slug: string; screenId: string } & Bounds) {
+    return safeInvoke<string>('embed_capture', {
+      slug: args.slug,
+      screenId: args.screenId,
+      x: args.x,
+      y: args.y,
+      w: args.w,
+      h: args.h,
+    });
+  },
 };
 
 export async function accountDataDir(project: string, accountId: string): Promise<string | null> {

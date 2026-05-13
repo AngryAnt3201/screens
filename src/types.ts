@@ -31,6 +31,12 @@ export interface Screen {
   status?: ScreenStatus;
   /** Free-form timestamp string shown on the card, e.g. "5m ago". */
   visitedAt?: string | null;
+  /**
+   * Epoch-ms timestamp of the last successful screenshot capture. Used to
+   * cache-bust the `<img src="file://…">` so the canvas re-renders the new
+   * PNG even though the path on disk stays the same.
+   */
+  capturedAt?: number | null;
 }
 
 /** Directed edge `[from, to]` between two screen IDs. */

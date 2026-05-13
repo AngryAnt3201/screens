@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Canvas } from './components/Canvas';
@@ -6,9 +6,21 @@ import { Inspector } from './components/Inspector';
 import { EmbeddedBrowser } from './components/EmbeddedBrowser';
 import { Check } from './components/icons';
 import { ScreensStoreProvider, useStore } from './lib/screensStore';
-import { embed } from './lib/tauri';
-import type { Account, ActivityEntry, Screen, ViewMode } from './types';
+import { embed, isTauri } from './lib/tauri';
+import type { Account, ActivityEntry, Screen, ScreensConfig, ViewMode } from './types';
 import { usePersistedState } from './hooks/usePersistedState';
+
+interface Bounds {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Time the embedded webview gets to settle after a CLI-driven navigate
+ *  before we trigger the screenshot. Matches roughly the time real dev
+ *  servers need for initial paint after route change. */
+const CAPTURE_SETTLE_MS = 1500;
 
 export function App() {
   return (
@@ -22,7 +34,7 @@ const TOAST_MS = 1800;
 const MAX_ACTIVITY = 30;
 
 function Shell() {
-  const { ready, current, projects, updateProjectMeta, onInbox } = useStore();
+  const { ready, current, projects, updateProjectMeta, writeScreens, onInbox } = useStore();
 
   // Persisted view + history; baseUrl now lives in the project meta so each
   // project remembers its own server.
@@ -72,6 +84,18 @@ function Shell() {
   const [selectedScreenId, setSelectedScreenId] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+
+  // Live bounds of the embedded webview pane, pushed up by EmbeddedBrowser.
+  // Kept in a ref (not state) so capture can read the latest value without
+  // re-creating the callback whenever the pane resizes.
+  const boundsRef = useRef<Bounds | null>(null);
+  // The screens config in a ref too — `capture` is invoked from the inbox
+  // listener which closes over its dependencies once; without this ref it'd
+  // operate on a stale array after a write.
+  const screensCfgRef = useRef(screensCfg);
+  useEffect(() => {
+    screensCfgRef.current = screensCfg;
+  }, [screensCfg]);
 
   const account: Account | null = useMemo(
     () => accounts.find((a) => a.id === accountId) ?? null,
@@ -138,18 +162,73 @@ function Shell() {
     [log, setAccountId],
   );
 
-  const capture = useCallback(() => {
-    const screen = screens.find((s) => s.id === currentScreenId);
-    if (!screen) {
-      log('captured', 'no current screen', 'warn');
-      return;
-    }
-    log(
-      'captured',
-      `${screen.path} → screenshot.png (${80 + Math.floor(Math.random() * 60)}kb)`,
-    );
-    setToast(`Captured ${screen.path}`);
-  }, [screens, currentScreenId, log]);
+  const capture = useCallback(
+    async (screenIdOverride?: string) => {
+      const cfg = screensCfgRef.current;
+      if (!cfg || !slug) {
+        log('captured', 'no project loaded', 'warn');
+        return;
+      }
+      const targetId = screenIdOverride ?? currentScreenId;
+      const screen = cfg.screens.find((s) => s.id === targetId);
+      if (!screen) {
+        log('captured', 'no current screen to capture', 'warn');
+        return;
+      }
+      // Browser fallback (`npm run dev`) has no native pane to grab.
+      if (!isTauri()) {
+        log('captured', 'screenshots require the desktop build', 'warn');
+        setToast('Screenshots require the desktop app');
+        return;
+      }
+      const b = boundsRef.current;
+      if (!b || b.w < 2 || b.h < 2) {
+        log('captured', 'embedded browser pane not ready', 'warn');
+        setToast('Switch to split / app view first');
+        return;
+      }
+      try {
+        const result = await embed.capture({
+          slug,
+          screenId: screen.id,
+          x: b.x,
+          y: b.y,
+          w: b.w,
+          h: b.h,
+        });
+        if (!result) {
+          // safeInvoke swallows the error to keep React renders alive — the
+          // detailed reason is in `console.warn`. Bubble a short hint.
+          throw new Error('capture failed (see DevTools console)');
+        }
+        const now = Date.now();
+        const next: ScreensConfig = {
+          ...cfg,
+          screens: cfg.screens.map((s) =>
+            s.id === screen.id
+              ? {
+                  ...s,
+                  status: 'captured',
+                  visitedAt: 'just now',
+                  capturedAt: now,
+                }
+              : s,
+          ),
+        };
+        await writeScreens(slug, next);
+        // Eagerly reflect the write so the canvas refreshes even before the
+        // file-watcher round-trips through the store.
+        screensCfgRef.current = next;
+        log('captured', `${screen.path} → ${screen.id}.png`);
+        setToast(`Captured ${screen.path}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log('captured', msg, 'warn');
+        setToast(`Capture failed: ${msg.slice(0, 80)}`);
+      }
+    },
+    [slug, currentScreenId, writeScreens, log],
+  );
 
   // ── Wire CLI inbox commands ────────────────────────────────────────────
   useEffect(() => {
@@ -172,11 +251,18 @@ function Shell() {
           embed.openDevtools();
           break;
         case 'capture': {
-          // If args.id given, briefly navigate to that screen first.
+          // `screens capture <id>` should land on that screen first so the
+          // resulting PNG matches the requested route. Navigate, give the
+          // embedded webview a moment to repaint, *then* snap. When no id is
+          // supplied we capture whatever's already showing.
           const id = (args.id as string) ?? null;
           if (id) {
             const s = screens.find((s) => s.id === id);
-            if (s) navigate(s);
+            if (s) {
+              navigate(s);
+              window.setTimeout(() => capture(id), CAPTURE_SETTLE_MS);
+              break;
+            }
           }
           capture();
           break;
@@ -274,7 +360,7 @@ function Shell() {
               account={account}
               onNavigate={openNode}
               onClose={() => setSelectedScreenId(null)}
-              onCapture={capture}
+              onCapture={() => capture()}
             />
           </div>
         )}
@@ -293,7 +379,10 @@ function Shell() {
               hIdx={hIdx}
               setHIdx={setHIdx}
               onNavigate={navigate}
-              onCapture={capture}
+              onCapture={() => capture()}
+              onBoundsChange={(b) => {
+                boundsRef.current = b;
+              }}
             />
           </div>
         )}

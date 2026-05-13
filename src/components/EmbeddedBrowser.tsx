@@ -21,6 +21,13 @@ interface EmbeddedBrowserProps {
   setHIdx: (n: number) => void;
   onNavigate: (path: string) => void;
   onCapture: () => void;
+  /**
+   * Pushed up to the parent every time the webview's container rectangle
+   * changes (mount / resize / pane reflow). The screenshot pipeline needs
+   * the live bounds to feed `embed_capture` even when the click originates
+   * outside this component (CLI inbox, Inspector button, …).
+   */
+  onBoundsChange?: (b: Bounds | null) => void;
   /** Reports auto-login outcome so the parent can log it. */
   onAutoLogin?: (account: Account, ok: boolean) => void;
 }
@@ -44,6 +51,7 @@ export function EmbeddedBrowser({
   setHIdx,
   onNavigate,
   onCapture,
+  onBoundsChange,
   onAutoLogin,
 }: EmbeddedBrowserProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -149,6 +157,13 @@ export function EmbeddedBrowser({
     if (!tauriMode || !bounds) return;
     embed.bounds(bounds);
   }, [bounds, tauriMode]);
+
+  // ---- Surface bounds to the parent so capture has live coords ----
+  useEffect(() => {
+    if (!onBoundsChange) return;
+    onBoundsChange(bounds);
+    return () => onBoundsChange(null);
+  }, [bounds, onBoundsChange]);
 
   // ---- Path-only navigation ----
   useEffect(() => {

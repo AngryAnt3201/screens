@@ -31,15 +31,19 @@ function NodeCardImpl({ data, selected: rfSelected }: NodeProps) {
     }
     let cancelled = false;
     fetchScreenshotUrl(projectSlug, screen.id).then((url) => {
-      if (!cancelled) {
-        setImgUrl(url);
-        setImgError(false);
-      }
+      if (cancelled) return;
+      // The PNG on disk is overwritten in place each capture, so WebKit
+      // happily serves the stale cached image. Pinning the URL to the last
+      // `capturedAt` timestamp side-steps that without writing a new file.
+      const versioned =
+        url && screen.capturedAt ? `${url}?v=${screen.capturedAt}` : url;
+      setImgUrl(versioned);
+      setImgError(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [projectSlug, screen.id, screen.status]);
+  }, [projectSlug, screen.id, screen.status, screen.capturedAt]);
 
   const hasShot = !!imgUrl && !imgError;
 

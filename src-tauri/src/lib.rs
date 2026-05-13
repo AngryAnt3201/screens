@@ -103,6 +103,113 @@ async fn embed_devtools(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Capture the embedded webview pane to `~/.screens/projects/<slug>/screenshots/<id>.png`.
+///
+/// `x/y/w/h` are the webview's bounds in *logical* (CSS) pixels relative to the
+/// main window's content area — exactly what the frontend already tracks via
+/// `getBoundingClientRect` and feeds to `embed_bounds`. We add the main
+/// window's `inner_position` (converted from physical to logical via the scale
+/// factor) to get screen-absolute logical coords, then shell out to macOS's
+/// `screencapture -R x,y,w,h` which expects logical points.
+///
+/// Returns the `file://` URL of the freshly-written PNG on success.
+#[tauri::command]
+async fn embed_capture(
+    app: AppHandle,
+    slug: String,
+    screen_id: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<String, String> {
+    // Ensure the embedded webview actually exists before we go off and grab
+    // the screen — otherwise the user is staring at the React UI and we'd be
+    // capturing the wrong rectangle.
+    let _ = embedded(&app)?;
+
+    let main = app
+        .get_window("main")
+        .ok_or_else(|| "no main window".to_string())?;
+    let win_inner = main
+        .inner_position()
+        .map_err(|e| format!("inner_position: {}", e))?;
+    let scale = main
+        .scale_factor()
+        .map_err(|e| format!("scale_factor: {}", e))?;
+    if scale <= 0.0 {
+        return Err(format!("invalid scale factor: {}", scale));
+    }
+
+    // `inner_position` is physical pixels; the bounds we got from JS are
+    // logical. Convert the window origin to logical so we can add cleanly.
+    let win_inner_x_logical = win_inner.x as f64 / scale;
+    let win_inner_y_logical = win_inner.y as f64 / scale;
+    let abs_x = win_inner_x_logical + x;
+    let abs_y = win_inner_y_logical + y;
+    let abs_w = w.max(1.0);
+    let abs_h = h.max(1.0);
+
+    let path = store::screenshot_path(&slug, &screen_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {}", parent.display(), e))?;
+    }
+    // Wipe any prior file first so we can detect a silent screencapture failure
+    // by checking that the file (re)appeared.
+    let _ = std::fs::remove_file(&path);
+
+    #[cfg(target_os = "macos")]
+    {
+        // `screencapture -R x,y,w,h` accepts logical screen points. `-x` mutes
+        // the shutter sound; `-C` would include the cursor — we omit it so an
+        // accidental hover doesn't leak into the thumbnail.
+        let region = format!(
+            "{},{},{},{}",
+            abs_x.round() as i64,
+            abs_y.round() as i64,
+            abs_w.round() as i64,
+            abs_h.round() as i64,
+        );
+        let output = std::process::Command::new("/usr/sbin/screencapture")
+            .arg("-x")
+            .arg("-t").arg("png")
+            .arg("-R").arg(&region)
+            .arg(&path)
+            .output()
+            .map_err(|e| format!("spawn screencapture: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "screencapture exited with {} — {}",
+                output.status,
+                stderr.trim(),
+            ));
+        }
+        // macOS denies screen capture silently when Screen Recording permission
+        // isn't granted: the process exits 0 but writes nothing. Surface a
+        // useful message in that case.
+        let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if !path.exists() || len == 0 {
+            let _ = std::fs::remove_file(&path);
+            return Err(
+                "screencapture wrote no output. Grant Screen Recording permission to this app in System Settings → Privacy & Security → Screen Recording, then try again."
+                    .into(),
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Stop the linter from yelling about unused vars on Windows / Linux.
+        let _ = (abs_x, abs_y, abs_w, abs_h);
+        return Err(
+            "embed_capture: native screenshot is only implemented on macOS so far. PRs welcome.".into(),
+        );
+    }
+
+    Ok(format!("file://{}", path.display()))
+}
+
 #[tauri::command]
 fn account_data_dir(_app: AppHandle, project: String, account_id: String) -> Result<String, String> {
     let safe_project: String = sanitize(&project);
@@ -226,6 +333,7 @@ pub fn run() {
             embed_close,
             embed_reload,
             embed_devtools,
+            embed_capture,
             account_data_dir,
             // store
             store_home,
