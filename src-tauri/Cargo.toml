@@ -19,8 +19,11 @@ serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 # `unstable` enables `Window::add_child`, the multi-webview API we use to
-# embed a real WebView2/WKWebView pane inside the app window (with DevTools).
-tauri = { version = "2.11.1", features = ["unstable"] }
+# embed a real WebView2/WKWebView pane inside the app window. `devtools` keeps
+# `Webview::open_devtools()` available in release builds too — without it
+# the method is gated behind `debug_assertions` and the release build fails
+# to compile our embedded-pane DevTools button.
+tauri = { version = "2.11.1", features = ["unstable", "devtools"] }
 tauri-plugin-log = "2"
 notify = "6.1"
 dirs = "5"
