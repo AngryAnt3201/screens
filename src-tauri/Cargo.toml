@@ -23,7 +23,7 @@ log = "0.4"
 # `Webview::open_devtools()` available in release builds too — without it
 # the method is gated behind `debug_assertions` and the release build fails
 # to compile our embedded-pane DevTools button.
-tauri = { version = "2.11.1", features = ["unstable", "devtools"] }
+tauri = { version = "2.11.1", features = ["unstable", "devtools", "protocol-asset"] }
 tauri-plugin-log = "2"
 notify = "6.1"
 dirs = "5"

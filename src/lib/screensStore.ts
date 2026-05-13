@@ -6,7 +6,7 @@
  * the example "demo" project — handy for visual design work.
  */
 import { createContext, createElement, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { isTauri } from './tauri';
 import type { AccountsConfig, ScreensConfig } from '../types';
@@ -248,11 +248,22 @@ export function ScreensStoreProvider({ children }: ProviderProps) {
   return createElement(StoreContext.Provider, { value }, children);
 }
 
-/** Resolve a screenshot URL via invoke (async). NodeCard uses this. */
+/**
+ * Resolve a screenshot URL via invoke (async). NodeCard uses this.
+ *
+ * Rust returns the absolute filesystem path of the PNG (or null when the
+ * file doesn't exist). We wrap with `convertFileSrc()` to produce an
+ * `asset://` URL the Tauri webview is permitted to load — `file://` URLs
+ * are blocked by Tauri 2's default security policy. The matching
+ * `assetProtocol.scope` entry in `tauri.conf.json` authorises reads under
+ * `~/.screens/`.
+ */
 export async function fetchScreenshotUrl(slug: string, screenId: string): Promise<string | null> {
   if (!isTauri()) return `/screenshots/${encodeURIComponent(screenId)}.png`;
   try {
-    return await invoke<string | null>('store_screenshot_url', { slug, screenId });
+    const path = await invoke<string | null>('store_screenshot_url', { slug, screenId });
+    if (!path) return null;
+    return convertFileSrc(path);
   } catch {
     return null;
   }

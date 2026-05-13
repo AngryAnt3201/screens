@@ -306,15 +306,17 @@ fn store_write_accounts(slug: String, data: serde_json::Value) -> Result<(), Str
     store::write_accounts_value(&slug, data)
 }
 
-/// Return a file:// URL for a screenshot, suitable for `<img src>` in the
-/// webview. Returns null when the file doesn't exist.
+/// Return the absolute filesystem path of a screenshot. The TS side wraps
+/// this in Tauri's `convertFileSrc()` to produce an `asset://` URL the
+/// webview is permitted to load — `file://` URLs are blocked by Tauri 2's
+/// default security policy. Returns null when the file doesn't exist.
 #[tauri::command]
 fn store_screenshot_url(_app: AppHandle, slug: String, screen_id: String) -> Option<String> {
     let path = store::screenshot_path(&slug, &screen_id);
     if !path.exists() {
         return None;
     }
-    Some(format!("file://{}", path.display()))
+    Some(path.to_string_lossy().into_owned())
 }
 
 // ─── Tauri builder ─────────────────────────────────────────────────────────
