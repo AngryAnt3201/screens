@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { ConsoleFilter } from './ConsoleFilter';
 import { ConsoleLog } from './ConsoleLog';
 import { ConsoleInput } from './ConsoleInput';
@@ -27,7 +27,6 @@ export function ConsoleDrawer({ open, onClose }: Props) {
   );
   const draggingRef = useRef(false);
   const startRef = useRef<{ x: number; width: number }>({ x: 0, width: DEFAULT_WIDTH });
-  const [, force] = useState(0);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -44,7 +43,6 @@ export function ConsoleDrawer({ open, onClose }: Props) {
       const dx = startRef.current.x - e.clientX;       // drag left → grow
       const next = clamp(startRef.current.width + dx, MIN_WIDTH, window.innerWidth * 0.8);
       setWidth(next);
-      force((n) => n + 1);
     },
     [setWidth],
   );

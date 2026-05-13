@@ -2,12 +2,11 @@ import { useCallback, useRef, useState } from 'react';
 import { useConsoleStore } from '../../lib/console/consoleStore';
 import { embed, isTauri } from '../../lib/tauri';
 
-let evalCounter = 0;
-
 export function ConsoleInput() {
   const { state, dispatch } = useConsoleStore();
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const [draft, setDraft] = useState('');
+  const evalCounterRef = useRef(0);
   const [histIdx, setHistIdx] = useState<number | null>(null);
 
   const disabled = !isTauri();
@@ -31,7 +30,8 @@ export function ConsoleInput() {
     });
     dispatch({ type: 'pushHistory', text: code });
 
-    const evalId = `r${++evalCounter}`;
+    evalCounterRef.current += 1;
+    const evalId = `r${evalCounterRef.current}`;
     const wrapped =
       `window.__SCREENS_CONSOLE__ && window.__SCREENS_CONSOLE__.run(` +
       JSON.stringify({ op: 'eval', code, id: evalId }) +
