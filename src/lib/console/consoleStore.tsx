@@ -10,6 +10,7 @@ import {
 import type { FilterState, LogEntry, Preview } from './types';
 import { BUFFER_DROP_BATCH, BUFFER_LIMIT, DEFAULT_FILTER } from './types';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { useConsoleBridge } from './useConsoleBridge';
 
 export interface ConsoleState {
   entries: LogEntry[];
@@ -143,7 +144,17 @@ export function ConsoleStoreProvider({ children }: { children: ReactNode }) {
   }, [state.filter, setPersistedFilter]);
 
   const value = useMemo(() => ({ state, dispatch }), [state]);
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={value}>
+      <BridgeMount />
+      {children}
+    </Ctx.Provider>
+  );
+}
+
+function BridgeMount() {
+  useConsoleBridge();
+  return null;
 }
 
 export function useConsoleStore(): ConsoleContextValue {
