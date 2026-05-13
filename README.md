@@ -97,6 +97,19 @@ screens account use tester      # tells the running app to switch
 
 All commands accept `--project=<slug>` to target a project other than the current one. The `$SCREENS_HOME` env var moves the store off `~/.screens` (handy for tests).
 
+## In-app console
+
+The right pane has a Chrome-style Console docked to its right edge.
+
+- Toggle: button in the URL bar or `⌘\`` / `Ctrl+\``.
+- Filter: regex, level chips (Errors / Warnings / Info / Verbose).
+- Evaluate: type JS into the prompt — `(0, eval)(…)` semantics, so it runs in
+  the page's global scope, exactly like Chrome.
+- Preserve log on navigation: on by default.
+
+For deep debugging (Elements, Network, Sources, …), the existing `[🔍]`
+button still pops the real native DevTools window.
+
 ## How the runtime control works
 
 The CLI commands `go / reload / devtools / capture / view / account use` write a JSON line to `~/.screens/inbox.jsonl`. The desktop app watches that file via the Rust `notify` crate and dispatches each command into the React UI. Latency is well under 100ms in practice.
