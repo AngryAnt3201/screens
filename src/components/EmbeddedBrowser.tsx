@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Account, LoginAutomation } from '../types';
 import { accountDataDir, embed, isTauri } from '../lib/tauri';
 import { buildInjectScript } from '../lib/console/consoleInject';
-import { Back, Camera, Forward, Globe, Reload, Search } from './icons';
+import { Back, Camera, Forward, Globe, Reload, Search, Terminal } from './icons';
+import { ConsoleDrawer } from './Console/ConsoleDrawer';
+import { usePersistedState } from '../hooks/usePersistedState';
 
 interface Bounds {
   x: number;
@@ -56,6 +58,10 @@ export function EmbeddedBrowser({
   const fallbackIframeRef = useRef<HTMLIFrameElement | null>(null);
   const [bounds, setBounds] = useState<Bounds | null>(null);
   const [tauriMode] = useState(() => isTauri());
+  const [consoleOpen, setConsoleOpen] = usePersistedState<boolean>(
+    'screens:console:open',
+    false,
+  );
 
   const cleanedBase = baseUrl.replace(/\/$/, '');
   const fullUrl = cleanedBase + path;
@@ -174,6 +180,24 @@ export function EmbeddedBrowser({
     embed.navigate(fullUrl);
   }, [fullUrl, tauriMode]);
 
+  // ---- Console keyboard shortcuts ----
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key === '`') {
+        e.preventDefault();
+        setConsoleOpen((v) => !v);
+      } else if (meta && e.altKey && (e.key === 'J' || e.key === 'j')) {
+        e.preventDefault();
+        setConsoleOpen(true);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setConsoleOpen]);
+
   // ---- Teardown when the pane unmounts (e.g. view switched to map) ----
   useEffect(() => {
     return () => {
@@ -244,6 +268,14 @@ export function EmbeddedBrowser({
           <Search />
         </button>
         <button
+          className={`icon-btn ${consoleOpen ? 'active' : ''}`}
+          type="button"
+          title="Toggle console (⌘`)"
+          onClick={() => setConsoleOpen((v) => !v)}
+        >
+          <Terminal />
+        </button>
+        <button
           className="icon-btn"
           type="button"
           title="Capture screenshot"
@@ -252,16 +284,19 @@ export function EmbeddedBrowser({
           <Camera />
         </button>
       </div>
-      <div className="iframe-body" ref={containerRef}>
-        {!tauriMode && (
-          <iframe
-            ref={fallbackIframeRef}
-            src={fullUrl}
-            title="Embedded app (fallback iframe)"
-            sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
-          />
-        )}
-        {tauriMode && !bounds && <BootingHint />}
+      <div className="iframe-body-row">
+        <div className="iframe-body" ref={containerRef}>
+          {!tauriMode && (
+            <iframe
+              ref={fallbackIframeRef}
+              src={fullUrl}
+              title="Embedded app (fallback iframe)"
+              sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+            />
+          )}
+          {tauriMode && !bounds && <BootingHint />}
+        </div>
+        <ConsoleDrawer open={consoleOpen} onClose={() => setConsoleOpen(false)} />
       </div>
       {/* Bridge: in-webview apps can post messages back to update history. */}
       <MessageBridge onNavigate={onNavigate} />

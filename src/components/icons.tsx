@@ -157,3 +157,10 @@ export const Monitor = ({ size = 14, ...p }: IconProps) => (
     <path d="M5.5 14h5M8 11.5V14" />
   </svg>
 );
+
+export const Terminal = ({ size = 14, ...p }: IconProps) => (
+  <svg {...base(size)} {...p}>
+    <rect x="2" y="3" width="12" height="10" rx="1.4" />
+    <path d="M5 7l2 1.5L5 10M8.5 10.5h3" />
+  </svg>
+);

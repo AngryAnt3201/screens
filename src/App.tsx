@@ -6,6 +6,7 @@ import { Inspector } from './components/Inspector';
 import { EmbeddedBrowser } from './components/EmbeddedBrowser';
 import { Check } from './components/icons';
 import { ScreensStoreProvider, useStore } from './lib/screensStore';
+import { ConsoleStoreProvider } from './lib/console/consoleStore';
 import { embed, isTauri } from './lib/tauri';
 import type { Account, ActivityEntry, Screen, ScreensConfig, ViewMode } from './types';
 import { usePersistedState } from './hooks/usePersistedState';
@@ -34,7 +35,9 @@ const AUTOLOGIN_TIMEOUT_MS = 10_000;
 export function App() {
   return (
     <ScreensStoreProvider>
-      <Shell />
+      <ConsoleStoreProvider>
+        <Shell />
+      </ConsoleStoreProvider>
     </ScreensStoreProvider>
   );
 }
