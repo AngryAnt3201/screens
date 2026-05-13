@@ -10,7 +10,7 @@ mod watcher;
 
 use std::path::PathBuf;
 use tauri::{
-    webview::WebviewBuilder, AppHandle, LogicalPosition, LogicalSize, Manager,
+    webview::WebviewBuilder, AppHandle, Emitter, LogicalPosition, LogicalSize, Manager,
     Url, WebviewUrl,
 };
 
@@ -318,6 +318,29 @@ fn store_screenshot_url(_app: AppHandle, slug: String, screen_id: String) -> Opt
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol("screens-ipc", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let body_bytes = request.body().to_vec();
+            let path = request.uri().path().trim_start_matches('/').to_string();
+            tauri::async_runtime::spawn(async move {
+                if path == "post" {
+                    match serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+                        Ok(v) => {
+                            let _ = app.emit("console:event", v);
+                        }
+                        Err(e) => log::warn!("[screens-ipc] bad payload: {}", e),
+                    }
+                }
+                let resp = tauri::http::Response::builder()
+                    .status(tauri::http::StatusCode::NO_CONTENT)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Methods", "POST, OPTIONS")
+                    .header("Access-Control-Allow-Headers", "Content-Type")
+                    .body(Vec::new())
+                    .unwrap();
+                responder.respond(resp);
+            });
+        })
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
