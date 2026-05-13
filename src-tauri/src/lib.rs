@@ -103,6 +103,15 @@ async fn embed_devtools(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// The embedded webview's current URL. Used by the auto-login outcome
+/// detector — App.tsx polls this after switching account and treats a
+/// transition to `login.successUrl` as a successful sign-in.
+#[tauri::command]
+async fn embed_url(app: AppHandle) -> Result<String, String> {
+    let wv = embedded(&app)?;
+    wv.url().map(|u| u.to_string()).map_err(|e| e.to_string())
+}
+
 /// Capture the embedded webview pane to `~/.screens/projects/<slug>/screenshots/<id>.png`.
 ///
 /// `x/y/w/h` are the webview's bounds in *logical* (CSS) pixels relative to the
@@ -333,6 +342,7 @@ pub fn run() {
             embed_close,
             embed_reload,
             embed_devtools,
+            embed_url,
             embed_capture,
             account_data_dir,
             // store

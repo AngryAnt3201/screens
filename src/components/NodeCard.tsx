@@ -2,6 +2,8 @@ import { memo, useEffect, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { Screen } from '../types';
 import { fetchScreenshotUrl } from '../lib/screensStore';
+import { formatRelative } from '../lib/time';
+import { useMinuteClock } from '../hooks/useMinuteClock';
 
 export interface ScreenNodeData extends Record<string, unknown> {
   screen: Screen;
@@ -20,6 +22,8 @@ export interface ScreenNodeData extends Record<string, unknown> {
 function NodeCardImpl({ data, selected: rfSelected }: NodeProps) {
   const { screen, current, projectSlug } = data as ScreenNodeData;
   const isSelected = rfSelected || (data as ScreenNodeData).selected;
+  // Keep the "5m ago" label fresh without depending on the parent to re-render.
+  useMinuteClock();
 
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
@@ -88,7 +92,7 @@ function NodeCardImpl({ data, selected: rfSelected }: NodeProps) {
           {screen.group}
         </span>
         <span className="node-title">{screen.title}</span>
-        <span className="node-stale">{screen.visitedAt || '—'}</span>
+        <span className="node-stale">{formatRelative(screen.visitedAt)}</span>
       </div>
     </div>
   );

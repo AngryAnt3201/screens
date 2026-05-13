@@ -29,8 +29,12 @@ export interface Screen {
   x: number;
   y: number;
   status?: ScreenStatus;
-  /** Free-form timestamp string shown on the card, e.g. "5m ago". */
-  visitedAt?: string | null;
+  /**
+   * Last visit / capture time. Epoch-ms is the canonical form (so cards age
+   * over time). Free-form strings ("5m ago") are accepted on read for legacy
+   * `screens.json` files and for the in-repo demo seed.
+   */
+  visitedAt?: number | string | null;
   /**
    * Epoch-ms timestamp of the last successful screenshot capture. Used to
    * cache-bust the `<img src="file://…">` so the canvas re-renders the new

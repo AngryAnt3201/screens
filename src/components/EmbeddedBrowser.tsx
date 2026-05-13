@@ -28,8 +28,6 @@ interface EmbeddedBrowserProps {
    * outside this component (CLI inbox, Inspector button, …).
    */
   onBoundsChange?: (b: Bounds | null) => void;
-  /** Reports auto-login outcome so the parent can log it. */
-  onAutoLogin?: (account: Account, ok: boolean) => void;
 }
 
 /**
@@ -52,7 +50,6 @@ export function EmbeddedBrowser({
   onNavigate,
   onCapture,
   onBoundsChange,
-  onAutoLogin,
 }: EmbeddedBrowserProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fallbackIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -136,7 +133,9 @@ export function EmbeddedBrowser({
           ...bounds,
           dataDir: dir ?? undefined,
         });
-        // Try auto-login if configured.
+        // Try auto-login if configured. Outcome detection lives in App.tsx
+        // (it polls `embed_url` for the `successUrl`); here we just fire
+        // the injection.
         if (account?.login && account.password) {
           // Wait for the login page to lay out before injecting. The script
           // itself also polls for selectors, so the delay is just to let
@@ -145,12 +144,11 @@ export function EmbeddedBrowser({
             const js = buildLoginScript(account.login!, account, baseUrl);
             embed.evalJs(js);
           }, 600);
-          onAutoLogin?.(account, true);
         }
       })();
       return;
     }
-  }, [account?.id, projectSlug, bounds, baseUrl, path, tauriMode, cleanedBase, onAutoLogin]);
+  }, [account?.id, projectSlug, bounds, baseUrl, path, tauriMode, cleanedBase]);
 
   // ---- Bounds push (separate so it isn't gated by account changes) ----
   useEffect(() => {

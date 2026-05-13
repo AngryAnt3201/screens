@@ -1,5 +1,4 @@
 import type { ViewMode } from '../types';
-import { Search, Settings } from './icons';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -58,15 +57,9 @@ export function TopBar({
       <div className="topbar-right">
         <div className={'agent-status' + (agentConnected ? '' : ' offline')}>
           <span className="pulse" />
-          {agentConnected ? 'agent · live' : 'agent · offline'}
+          {agentConnected ? 'agent · live' : 'agent · idle'}
         </div>
-        <button className="icon-btn" title="Command palette (⌘K)" type="button">
-          <Search />
-        </button>
         <ThemeToggle />
-        <button className="icon-btn" title="Settings" type="button">
-          <Settings />
-        </button>
       </div>
     </header>
   );

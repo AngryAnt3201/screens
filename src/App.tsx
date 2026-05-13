@@ -22,6 +22,15 @@ interface Bounds {
  *  servers need for initial paint after route change. */
 const CAPTURE_SETTLE_MS = 1500;
 
+/** How long after the most recent inbox command the agent-status pill stays
+ *  in its "live" state. After this window we flip back to "idle". */
+const AGENT_LIVE_MS = 30_000;
+
+/** Auto-login outcome polling: how often to ask the embedded webview for its
+ *  current URL, and how long before we give up and report a likely failure. */
+const AUTOLOGIN_POLL_MS = 500;
+const AUTOLOGIN_TIMEOUT_MS = 10_000;
+
 export function App() {
   return (
     <ScreensStoreProvider>
@@ -84,6 +93,10 @@ function Shell() {
   const [selectedScreenId, setSelectedScreenId] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  // True for `AGENT_LIVE_MS` after the last inbox command; drives the
+  // "agent · live / idle" pill in the top bar.
+  const [agentLive, setAgentLive] = useState(false);
+  const agentTimerRef = useRef<number | null>(null);
 
   // Live bounds of the embedded webview pane, pushed up by EmbeddedBrowser.
   // Kept in a ref (not state) so capture can read the latest value without
@@ -148,18 +161,81 @@ function Shell() {
     [navigate, view, setView],
   );
 
+  // Tracks the in-flight auto-login outcome poller so a second account
+  // switch cancels the first one's observation.
+  const autoLoginAbortRef = useRef<(() => void) | null>(null);
+
+  // Polls the embedded webview's URL after an auto-login injection. Resolves
+  // when the URL matches the configured `successUrl`, rejects with a timeout
+  // string otherwise. No-op outside Tauri (the iframe fallback can't auto-
+  // login anyway) and when the account has no `successUrl` configured.
+  const watchAutoLoginOutcome = useCallback(
+    (account: Account, baseAtFire: string) => {
+      autoLoginAbortRef.current?.();
+      autoLoginAbortRef.current = null;
+      if (!isTauri()) return;
+      const target = account.login?.successUrl;
+      if (!target) return;
+      const cleanBase = baseAtFire.replace(/\/$/, '');
+      const fullTarget = /^https?:/i.test(target) ? target : cleanBase + target;
+      const startedAt = Date.now();
+      let cancelled = false;
+      const interval = window.setInterval(async () => {
+        if (cancelled) return;
+        try {
+          const url = await embed.url();
+          if (url && url.startsWith(fullTarget)) {
+            cancelled = true;
+            window.clearInterval(interval);
+            autoLoginAbortRef.current = null;
+            log('login', `signed in as ${account.email}`);
+            setToast(`Signed in as ${account.name}`);
+            return;
+          }
+        } catch {
+          // Transient — the webview might be mid-navigation. Try again.
+        }
+        if (Date.now() - startedAt > AUTOLOGIN_TIMEOUT_MS) {
+          cancelled = true;
+          window.clearInterval(interval);
+          autoLoginAbortRef.current = null;
+          log(
+            'login',
+            `auto-login for ${account.email} didn't reach ${target} — check DevTools`,
+            'warn',
+          );
+          setToast(`Auto-login may have failed`);
+        }
+      }, AUTOLOGIN_POLL_MS);
+      autoLoginAbortRef.current = () => {
+        cancelled = true;
+        window.clearInterval(interval);
+      };
+    },
+    [log],
+  );
+
   const pickAccount = useCallback(
     (a: Account) => {
       setAccountId(a.id);
       log('switched', `session → ${a.email}`);
       if (a.login) {
-        log('login', `auto-fill queued for ${a.email}`);
+        log('login', `auto-fill triggered for ${a.email}`);
         setToast(`Signing in as ${a.name}…`);
+        // `baseUrl` may not be defined yet on first render; the destructure
+        // below tolerates that. We close over the current base so a base-url
+        // change mid-flight doesn't corrupt the comparison.
+        const base = projectMeta?.baseUrl ?? '';
+        watchAutoLoginOutcome(a, base);
       } else {
+        // Cancel any in-flight observation when switching to a no-login
+        // account — its target URL is irrelevant.
+        autoLoginAbortRef.current?.();
+        autoLoginAbortRef.current = null;
         setToast(`Switched to ${a.name}`);
       }
     },
-    [log, setAccountId],
+    [log, setAccountId, watchAutoLoginOutcome, projectMeta?.baseUrl],
   );
 
   const capture = useCallback(
@@ -209,7 +285,9 @@ function Shell() {
               ? {
                   ...s,
                   status: 'captured',
-                  visitedAt: 'just now',
+                  // Epoch-ms so the card ages in real time, not a frozen
+                  // "just now" string.
+                  visitedAt: now,
                   capturedAt: now,
                 }
               : s,
@@ -234,6 +312,16 @@ function Shell() {
   useEffect(() => {
     const off = onInbox((cmd, args) => {
       log('cli', `${cmd} ${JSON.stringify(args)}`);
+      // Flip the agent pill to "live" and reset the idle countdown. Any
+      // command counts — `navigate`, `view`, `capture`, even malformed ones.
+      setAgentLive(true);
+      if (agentTimerRef.current !== null) {
+        window.clearTimeout(agentTimerRef.current);
+      }
+      agentTimerRef.current = window.setTimeout(() => {
+        setAgentLive(false);
+        agentTimerRef.current = null;
+      }, AGENT_LIVE_MS);
       switch (cmd) {
         case 'navigate': {
           const t = String(args.target ?? '');
@@ -286,7 +374,13 @@ function Shell() {
           break;
       }
     });
-    return off;
+    return () => {
+      off();
+      if (agentTimerRef.current !== null) {
+        window.clearTimeout(agentTimerRef.current);
+        agentTimerRef.current = null;
+      }
+    };
   }, [onInbox, screens, accounts, navigate, capture, pickAccount, setView, log]);
 
   // Toast auto-dismiss.
@@ -295,6 +389,15 @@ function Shell() {
     const t = window.setTimeout(() => setToast(null), TOAST_MS);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  // Cancel any in-flight auto-login URL poller when the shell unmounts so
+  // its interval doesn't outlive the React tree.
+  useEffect(() => {
+    return () => {
+      autoLoginAbortRef.current?.();
+      autoLoginAbortRef.current = null;
+    };
+  }, []);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -326,7 +429,7 @@ function Shell() {
         setBaseUrl={setBaseUrl}
         view={view}
         setView={setView}
-        agentConnected={true}
+        agentConnected={agentLive}
       />
       <Sidebar
         groups={groups}

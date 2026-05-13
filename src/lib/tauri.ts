@@ -69,6 +69,10 @@ export const embed = {
   async openDevtools() {
     return safeInvoke<void>('embed_devtools', {});
   },
+  /** Current URL of the embedded webview, or `null` outside Tauri. */
+  async url() {
+    return safeInvoke<string>('embed_url', {});
+  },
   /**
    * Snap the embedded pane's pixels to disk at
    * `~/.screens/projects/<slug>/screenshots/<screenId>.png`. Returns the

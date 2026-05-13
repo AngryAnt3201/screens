@@ -1,5 +1,7 @@
 import type { Account, Screen } from '../types';
 import { Camera, Close, ExternalArrow } from './icons';
+import { formatRelative } from '../lib/time';
+import { useMinuteClock } from '../hooks/useMinuteClock';
 
 interface InspectorProps {
   screen: Screen | undefined;
@@ -16,6 +18,7 @@ export function Inspector({
   onClose,
   onCapture,
 }: InspectorProps) {
+  useMinuteClock();
   if (!screen) return null;
   return (
     <div className="inspector">
@@ -46,7 +49,7 @@ export function Inspector({
       <div className="row">
         <span className="k">last visit</span>
         <span style={{ fontFamily: 'var(--font-mono)' }}>
-          {screen.visitedAt || '—'}
+          {formatRelative(screen.visitedAt)}
         </span>
       </div>
       <div className="row">

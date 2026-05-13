@@ -382,7 +382,8 @@ function cmdStatus(args) {
   const s = data.screens.find((x) => x.id === id);
   if (!s) fail(`screen "${id}" not found`);
   s.status = value;
-  if (value === 'captured') s.visitedAt = 'just now';
+  // Epoch-ms; the desktop UI renders it as a live "Nm ago" label.
+  if (value === 'captured') s.visitedAt = Date.now();
   writeScreens(slug, data);
   ok(`set ${id} → ${value}`);
 }
@@ -409,7 +410,7 @@ function cmdShot(args) {
   const s = data.screens.find((x) => x.id === id);
   if (s) {
     s.status = 'captured';
-    s.visitedAt = 'just now';
+    s.visitedAt = Date.now();
     writeScreens(slug, data);
   }
   ok(`attached screenshot for "${id}"`);

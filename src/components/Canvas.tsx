@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -46,8 +46,33 @@ function CanvasInner({
 }: CanvasProps) {
   const rf = useReactFlow();
   const [zoom, setZoom] = useState(1);
-  const { current } = useStore();
+  const { current, writeScreens } = useStore();
   const projectSlug = current?.project.slug ?? 'demo';
+
+  // Persist screen positions when a card is dropped. We work from the
+  // store's `current.screens` rather than the prop so two captures racing
+  // a drag don't clobber each other (the prop is one render behind the
+  // last write).
+  const handleNodeDragStop = useCallback(
+    (_e: unknown, node: Node) => {
+      if (node.type !== 'screen') return;
+      if (!current) return;
+      const slug = current.project.slug;
+      const nx = Math.round(node.position.x);
+      const ny = Math.round(node.position.y);
+      const existing = current.screens.screens.find((s) => s.id === node.id);
+      if (!existing) return;
+      if (existing.x === nx && existing.y === ny) return; // no-op micro-drags
+      const next = {
+        ...current.screens,
+        screens: current.screens.screens.map((s) =>
+          s.id === node.id ? { ...s, x: nx, y: ny } : s,
+        ),
+      };
+      void writeScreens(slug, next);
+    },
+    [current, writeScreens],
+  );
 
   const screenById = useMemo(
     () => Object.fromEntries(screens.map((s) => [s.id, s])),
@@ -175,6 +200,7 @@ function CanvasInner({
             if (s) onNavigate(s);
           }
         }}
+        onNodeDragStop={handleNodeDragStop}
         onPaneClick={() => onSelect(null)}
         // We control selection via data prop — disable RF's multi-select drag.
         multiSelectionKeyCode={null}
