@@ -34,6 +34,7 @@ async fn embed_open(
     w: f64,
     h: f64,
     data_dir: Option<String>,
+    init_script: Option<String>,
 ) -> Result<(), String> {
     if let Some(existing) = app.webviews().get(EMBEDDED).cloned() {
         let _ = existing.close();
@@ -45,6 +46,9 @@ async fn embed_open(
     let parsed_url = parse_url(&url)?;
     let mut builder = WebviewBuilder::new(EMBEDDED, WebviewUrl::External(parsed_url))
         .devtools(true);
+    if let Some(script) = init_script {
+        builder = builder.initialization_script(script);
+    }
     if let Some(dir) = data_dir {
         builder = builder.data_directory(PathBuf::from(dir));
     }

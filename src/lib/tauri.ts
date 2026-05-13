@@ -27,6 +27,7 @@ interface Bounds {
 interface OpenArgs extends Bounds {
   url: string;
   dataDir?: string;
+  initScript?: string;
 }
 
 async function safeInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T | null> {
@@ -41,7 +42,7 @@ async function safeInvoke<T>(cmd: string, args: Record<string, unknown>): Promis
 }
 
 export const embed = {
-  async open({ url, x, y, w, h, dataDir }: OpenArgs) {
+  async open({ url, x, y, w, h, dataDir, initScript }: OpenArgs) {
     return safeInvoke<void>('embed_open', {
       url,
       x,
@@ -49,6 +50,7 @@ export const embed = {
       w,
       h,
       dataDir: dataDir ?? null,
+      initScript: initScript ?? null,
     });
   },
   async bounds({ x, y, w, h }: Bounds) {

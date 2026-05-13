@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Account, LoginAutomation } from '../types';
 import { accountDataDir, embed, isTauri } from '../lib/tauri';
+import { buildInjectScript } from '../lib/console/consoleInject';
 import { Back, Camera, Forward, Globe, Reload, Search } from './icons';
 
 interface Bounds {
@@ -132,6 +133,7 @@ export function EmbeddedBrowser({
           url: targetUrl,
           ...bounds,
           dataDir: dir ?? undefined,
+          initScript: buildInjectScript(),
         });
         // Try auto-login if configured. Outcome detection lives in App.tsx
         // (it polls `embed_url` for the `successUrl`); here we just fire
