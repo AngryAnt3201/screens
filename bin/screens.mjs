@@ -42,6 +42,12 @@ import {
   deriveTitle,
   autoPlace,
   SCREEN_STATUSES,
+  readReview,
+  writeReview,
+  pullVerdicts,
+  readVerdicts,
+  CHECK_STATUSES,
+  TICKET_STATUSES,
 } from './lib/store.mjs';
 
 // ─── Command dispatch ──────────────────────────────────────────────────────
@@ -69,6 +75,9 @@ const COMMANDS = {
 
   // accounts
   account: cmdAccount,
+
+  // review cockpit
+  review: cmdReview,
 
   // runtime (CLI → running app)
   open: cmdOpen,
@@ -130,13 +139,21 @@ Accounts:
   account use    <id>                        Switch active account (runtime).
   account default <id>                       Make <id> the default for the project.
 
+Review cockpit (agent emits checks; you rule them in the app, agent drains verdicts):
+  review add-ticket <id> --title=<t> [--ref --pr --summary --status]
+  review check      <ticketId> --title=<t> [--path=/x | --screen=<id>] [--account --detail --id]
+  review list       [--json]
+  review pull       [--json]                 Reviewer verdicts you haven't seen; advances cursor.
+  review resolve    <checkId> <awaiting|pass|fail|changes>
+  review reopen     <checkId>                Bump round + await re-review (after a fix).
+
 Runtime (require the desktop app to be running):
   open                                       Launch the desktop app.
   go      <idOrPath>                         Navigate the embedded browser.
   reload                                     Reload the embedded browser.
   devtools                                   Open DevTools on the embedded page.
   capture [<id>]                             Capture the current (or named) screen.
-  view    <map|split|app>
+  view    <map|split|app|review>
   base-url <newUrl>                          Update current project's base URL.
 
 Global flags:
@@ -525,6 +542,234 @@ function nextHue(cfg) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// review — the review cockpit (agent emits tickets/checks; drains verdicts)
+// ───────────────────────────────────────────────────────────────────────────
+
+function cmdReview(args) {
+  const [sub, ...subRest] = args.positional;
+  if (!sub || sub === 'help') return reviewHelp();
+  const subArgs = { ...args, positional: subRest };
+  const sub2 = {
+    'add-ticket': rAddTicket,
+    ticket: rAddTicket,
+    check: rCheck,
+    list: rList,
+    ls: rList,
+    pull: rPull,
+    resolve: rResolve,
+    reopen: rReopen,
+    'remove-ticket': rRemoveTicket,
+    'remove-check': rRemoveCheck,
+  }[sub];
+  if (!sub2) fail(`unknown review subcommand: ${sub}`);
+  sub2(subArgs);
+}
+
+function reviewHelp() {
+  console.log(`screens review <add-ticket|check|list|pull|resolve|reopen|remove-ticket|remove-check> ...
+
+  add-ticket <id> --title=<t> [--ref=<url> --pr=<url> --summary=<s> --status=<in-progress|in-review|done>]
+  check      <ticketId> --title=<t> [--path=/x | --screen=<screenId>] [--account=<id> --detail=<d> --id=<checkId>]
+  list       [--json]                     Tickets + checks + current display status.
+  pull       [--json]                     Print reviewer verdicts you haven't seen; advance the cursor.
+  resolve    <checkId> <awaiting|pass|fail|changes>   Set a check's canonical status.
+  reopen     <checkId>                    Bump the review round + set awaiting (re-request review after a fix).
+  remove-ticket <id> | remove-check <checkId>`);
+}
+
+function findCheck(review, checkId) {
+  for (const t of review.tickets) {
+    const c = (t.checks ?? []).find((x) => x.id === checkId);
+    if (c) return { ticket: t, check: c };
+  }
+  return null;
+}
+
+/** Slugify a free-form string into an id-safe token. */
+function slugToken(s) {
+  return String(s)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'x';
+}
+
+function rAddTicket(args) {
+  const slug = resolveProject(args);
+  const [id] = args.positional;
+  if (!id) fail('review add-ticket: <id> required');
+  if (!args.flags.title) fail('review add-ticket: --title=<t> required');
+  if (args.flags.status && !TICKET_STATUSES.has(args.flags.status)) {
+    fail(`invalid ticket status: ${args.flags.status}`);
+  }
+  const review = readReview(slug);
+  let ticket = review.tickets.find((t) => t.id === id);
+  if (!ticket) {
+    ticket = { id, checks: [], createdAt: Date.now() };
+    review.tickets.push(ticket);
+  }
+  ticket.title = args.flags.title;
+  if (args.flags.ref != null) ticket.ref = args.flags.ref;
+  if (args.flags.pr != null) ticket.pr = args.flags.pr;
+  if (args.flags.summary != null) ticket.summary = args.flags.summary;
+  ticket.status = args.flags.status ?? ticket.status ?? 'in-review';
+  writeReview(slug, review);
+  ok(`ticket "${id}" — ${ticket.title}`);
+}
+
+function rCheck(args) {
+  const slug = resolveProject(args);
+  const [ticketId] = args.positional;
+  if (!ticketId) fail('review check: <ticketId> required');
+  if (!args.flags.title) fail('review check: --title=<t> required');
+  const review = readReview(slug);
+  const ticket = review.tickets.find((t) => t.id === ticketId);
+  if (!ticket) fail(`unknown ticket: "${ticketId}" (run \`screens review add-ticket ${ticketId} --title=…\` first)`);
+  ticket.checks = ticket.checks ?? [];
+  const existingIds = new Set(review.tickets.flatMap((t) => (t.checks ?? []).map((c) => c.id)));
+  let id = args.flags.id;
+  if (!id) {
+    const base = `${slugToken(ticketId)}-${slugToken(args.flags.title)}`.slice(0, 56);
+    id = base;
+    for (let i = 2; existingIds.has(id); i++) id = `${base}-${i}`;
+  } else if (existingIds.has(id)) {
+    fail(`check "${id}" already exists`);
+  }
+  const check = {
+    id,
+    title: args.flags.title,
+    status: 'awaiting',
+    round: 0,
+  };
+  if (args.flags.detail != null) check.detail = args.flags.detail;
+  if (args.flags.path != null) check.path = args.flags.path;
+  if (args.flags.screen != null) check.screenId = args.flags.screen;
+  if (args.flags.account != null) check.account = args.flags.account;
+  ticket.checks.push(check);
+  writeReview(slug, review);
+  ok(`check "${id}" → ticket "${ticketId}"`);
+}
+
+/** Compute the display status of a check from the verdict log (round-matched). */
+function displayStatus(check, verdicts) {
+  let latest = null;
+  for (const v of verdicts) {
+    if (v.checkId === check.id && (v.round ?? 0) === (check.round ?? 0)) {
+      if (!latest || (v.ts ?? 0) >= (latest.ts ?? 0)) latest = v;
+    }
+  }
+  return latest ? latest.verdict : (check.status ?? 'awaiting');
+}
+
+function rollup(ticket, verdicts) {
+  const checks = ticket.checks ?? [];
+  if (checks.length === 0) return 'empty';
+  const statuses = checks.map((c) => displayStatus(c, verdicts));
+  if (statuses.some((s) => s === 'fail' || s === 'changes')) return 'needs-work';
+  if (statuses.every((s) => s === 'pass')) return 'passed';
+  return 'awaiting';
+}
+
+function rList(args) {
+  const slug = resolveProject(args);
+  const review = readReview(slug);
+  const verdicts = readVerdicts(slug);
+  if (args.flags.json) {
+    console.log(JSON.stringify({ tickets: review.tickets }, null, 2));
+    return;
+  }
+  if (review.tickets.length === 0) {
+    console.log(`(no review tickets yet in "${slug}" — run \`screens review add-ticket <id> --title=…\`)`);
+    return;
+  }
+  for (const t of review.tickets) {
+    const roll = rollup(t, verdicts);
+    console.log(`\n● ${t.id} — ${t.title}  [${roll}]${t.ref ? `  ${t.ref}` : ''}`);
+    for (const c of t.checks ?? []) {
+      const st = displayStatus(c, verdicts);
+      const mark = { pass: '✓', fail: '✗', changes: '~', awaiting: '·' }[st] ?? '·';
+      const where = c.path ?? (c.screenId ? `#${c.screenId}` : '—');
+      const acct = c.account ? `  @${c.account}` : '';
+      console.log(`   ${mark} [${st.padEnd(8)}] ${c.title}  →  ${where}${acct}  (${c.id})`);
+    }
+  }
+  const total = review.tickets.reduce((n, t) => n + (t.checks?.length ?? 0), 0);
+  console.log(`\n${review.tickets.length} tickets · ${total} checks · project "${slug}"`);
+}
+
+function rPull(args) {
+  const slug = resolveProject(args);
+  const fresh = pullVerdicts(slug);
+  if (args.flags.json) {
+    console.log(JSON.stringify(fresh, null, 2));
+    return;
+  }
+  if (fresh.length === 0) {
+    console.log('(no new verdicts)');
+    return;
+  }
+  for (const v of fresh) {
+    const mark = { pass: '✓', fail: '✗', changes: '~' }[v.verdict] ?? '?';
+    console.log(`${mark} ${v.verdict.padEnd(8)} ${v.checkId}${v.note ? `  — ${v.note}` : ''}`);
+  }
+  console.log(`\n${fresh.length} new verdict(s). Fix fails, then \`screens review reopen <checkId>\`.`);
+}
+
+function rResolve(args) {
+  const slug = resolveProject(args);
+  const [checkId, status] = args.positional;
+  if (!checkId || !status) fail('review resolve: <checkId> <awaiting|pass|fail|changes>');
+  if (!CHECK_STATUSES.has(status)) fail(`invalid check status: ${status}`);
+  const review = readReview(slug);
+  const found = findCheck(review, checkId);
+  if (!found) fail(`check "${checkId}" not found`);
+  found.check.status = status;
+  writeReview(slug, review);
+  ok(`resolved ${checkId} → ${status}`);
+}
+
+function rReopen(args) {
+  const slug = resolveProject(args);
+  const [checkId] = args.positional;
+  if (!checkId) fail('review reopen: <checkId> required');
+  const review = readReview(slug);
+  const found = findCheck(review, checkId);
+  if (!found) fail(`check "${checkId}" not found`);
+  found.check.round = (found.check.round ?? 0) + 1;
+  found.check.status = 'awaiting';
+  writeReview(slug, review);
+  ok(`reopened ${checkId} → round ${found.check.round} (awaiting re-review)`);
+}
+
+function rRemoveTicket(args) {
+  const slug = resolveProject(args);
+  const [id] = args.positional;
+  if (!id) fail('review remove-ticket: <id> required');
+  const review = readReview(slug);
+  const before = review.tickets.length;
+  review.tickets = review.tickets.filter((t) => t.id !== id);
+  if (review.tickets.length === before) fail(`ticket "${id}" not found`);
+  writeReview(slug, review);
+  ok(`removed ticket "${id}"`);
+}
+
+function rRemoveCheck(args) {
+  const slug = resolveProject(args);
+  const [checkId] = args.positional;
+  if (!checkId) fail('review remove-check: <checkId> required');
+  const review = readReview(slug);
+  let removed = false;
+  for (const t of review.tickets) {
+    const before = (t.checks ?? []).length;
+    t.checks = (t.checks ?? []).filter((c) => c.id !== checkId);
+    if (t.checks.length !== before) removed = true;
+  }
+  if (!removed) fail(`check "${checkId}" not found`);
+  writeReview(slug, review);
+  ok(`removed check "${checkId}"`);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Runtime / IPC
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -569,7 +814,7 @@ function cmdCapture(args) {
 
 function cmdView(args) {
   const [mode] = args.positional;
-  if (!['map', 'split', 'app'].includes(mode)) fail('view: <map|split|app>');
+  if (!['map', 'split', 'app', 'review'].includes(mode)) fail('view: <map|split|app|review>');
   emitInbox('view', { mode });
   ok(`view ${mode}`);
 }

@@ -8,12 +8,15 @@ interface TopBarProps {
   view: ViewMode;
   setView: (v: ViewMode) => void;
   agentConnected: boolean;
+  /** Count of checks awaiting a ruling — shown as a badge on the Review tab. */
+  reviewBadge?: number;
 }
 
 const TABS: Array<[ViewMode, string]> = [
   ['map', 'Map'],
   ['split', 'Split'],
   ['app', 'App'],
+  ['review', 'Review'],
 ];
 
 export function TopBar({
@@ -22,6 +25,7 @@ export function TopBar({
   view,
   setView,
   agentConnected,
+  reviewBadge = 0,
 }: TopBarProps) {
   return (
     <header className="topbar">
@@ -51,6 +55,9 @@ export function TopBar({
             aria-selected={view === k}
           >
             {l}
+            {k === 'review' && reviewBadge > 0 && (
+              <span className="tab-badge">{reviewBadge}</span>
+            )}
           </button>
         ))}
       </div>
