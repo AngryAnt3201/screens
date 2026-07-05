@@ -9,7 +9,7 @@ import { createContext, createElement, useContext, useEffect, useMemo, useRef, u
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { isTauri } from './tauri';
-import type { AccountsConfig, ScreensConfig } from '../types';
+import type { AccountsConfig, ReviewConfig, ScreensConfig, Verdict } from '../types';
 import { demoSeed } from './seed';
 
 export interface ProjectMeta {
@@ -29,6 +29,10 @@ export interface ProjectBundle {
   project: ProjectMeta;
   screens: ScreensConfig;
   accounts: AccountsConfig;
+  /** Agent-authored review tickets + checks. May be absent on older projects. */
+  review?: ReviewConfig;
+  /** App-authored verdict log (append-only), parsed. */
+  verdicts?: Verdict[];
 }
 
 interface InboxCommand {
@@ -55,6 +59,10 @@ interface StoreContextValue {
   /** Persist screens/edges/groups. */
   writeScreens: (slug: string, data: ScreensConfig) => Promise<void>;
   writeAccounts: (slug: string, data: AccountsConfig) => Promise<void>;
+  /** Append a reviewer verdict to `verdicts.jsonl` (the app is its sole writer).
+   *  Optimistically updates the in-memory bundle so the sidebar reacts at once;
+   *  the canonical value re-arrives via the file watcher. */
+  appendVerdict: (slug: string, verdict: Verdict) => Promise<void>;
   /** Resolve a screen-shot URL (file:// in Tauri, /seed/... in fallback). */
   screenshotUrl: (slug: string, screenId: string) => string | null;
   /** Subscribe to CLI commands (only emits in Tauri). */
@@ -214,6 +222,23 @@ export function ScreensStoreProvider({ children }: ProviderProps) {
     }
   };
 
+  const appendVerdict: StoreContextValue['appendVerdict'] = async (slug, verdict) => {
+    // Optimistic: reflect the verdict in the current bundle immediately so the
+    // check's display status flips without waiting for the watcher round-trip.
+    setBundle((b) =>
+      b && b.project.slug === slug
+        ? { ...b, verdicts: [...(b.verdicts ?? []), verdict] }
+        : b,
+    );
+    if (tauriMode) {
+      try {
+        await invoke('store_append_verdict', { slug, verdict });
+      } catch (err) {
+        console.error('[screens] append verdict:', err);
+      }
+    }
+  };
+
   const screenshotUrl: StoreContextValue['screenshotUrl'] = (_slug, screenId) => {
     if (!tauriMode) return `/screenshots/${encodeURIComponent(screenId)}.png`;
     // Tauri can't easily do a sync call here; NodeCard fetches via invoke.
@@ -238,6 +263,7 @@ export function ScreensStoreProvider({ children }: ProviderProps) {
       updateProjectMeta,
       writeScreens,
       writeAccounts,
+      appendVerdict,
       screenshotUrl,
       onInbox,
     }),

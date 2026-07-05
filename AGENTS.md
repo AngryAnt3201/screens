@@ -100,6 +100,72 @@ When an account has a `login` block, switching to it triggers an embedded-webvie
 
 Cookies are isolated per **project × account** under `~/Library/Application Support/dev.screens.app/accounts/<project>/<account>/` (macOS) — analogous paths on Windows / Linux. Switching account → automatic destroy + recreate of the embedded webview with the new cookie jar.
 
+## Review cockpit (the review loop)
+
+You emit review items; the human rules them in the app; you drain their verdicts
+and iterate. This is the *return leg* of the store: `review.json` is written
+**only by you** (the CLI); `verdicts.jsonl` is written **only by the app**. One
+writer per file — never hand-edit `verdicts.jsonl`.
+
+```bash
+# 1. One ticket group per Jira/Dart ticket (or per logical unit of work).
+screens review add-ticket DX-123 \
+  --title="Billing widget on dashboard" \
+  --ref="https://dexiq.atlassian.net/browse/DX-123" \
+  --pr="https://github.com/org/repo/pull/45"
+
+# 2. One check per atomic thing the human must verify. `--path` (or --screen)
+#    is where clicking the check jumps the embedded browser; `--account`
+#    switches session (triggers auto-login) before you land there.
+screens review check DX-123 \
+  --title="Dashboard shows billing widget" \
+  --path=/app/dashboard --account=tester \
+  --detail="Widget top-right, shows current plan name."
+
+# 3. Later, read what the human ruled (advances a cursor — each verdict once).
+screens review pull            # or --json for machine parsing
+
+# 4. For each fail / changes: fix the code, then re-request review. `reopen`
+#    bumps the check's round so the stale verdict no longer applies and it
+#    shows as awaiting again in the sidebar.
+screens review reopen dx-123-dashboard-shows-billing-widget
+
+# Housekeeping
+screens review list [--json]                 # tickets + checks + display status
+screens review resolve <checkId> <status>    # set canonical status directly
+screens review remove-ticket <id> | remove-check <checkId>
+```
+
+**Free-dump intake:** there's no magic parser. Given a paste of tasks or a ticket
+body, *you* decide the tickets + checks and call `add-ticket` / `check`. A check's
+display status in the app is derived from the latest verdict whose `round`
+matches the check's current `round`; `reopen` is what makes re-review work.
+
+### Review file schemas
+
+`review.json` (you write):
+
+```jsonc
+{ "tickets": [ {
+  "id": "DX-123", "title": "...", "ref": "https://…", "pr": "https://…",
+  "status": "in-review", "createdAt": 1778625844000,
+  "checks": [ {
+    "id": "dx-123-c1", "title": "what to verify", "detail": "what done looks like",
+    "path": "/app/dashboard", "screenId": "dashboard", "account": "tester",
+    "status": "awaiting", "round": 0
+  } ]
+} ] }
+```
+
+`verdicts.jsonl` (the app writes; you only `pull`):
+
+```jsonc
+{ "ts": 1778625851000, "ticketId": "DX-123", "checkId": "dx-123-c1", "round": 0, "verdict": "pass" }
+{ "ts": 1778625860000, "ticketId": "DX-123", "checkId": "dx-123-c2", "round": 0, "verdict": "fail", "note": "overflows on mobile" }
+```
+
+`verdict ∈ {pass, fail, changes}`. The cursor lives in `verdicts.cursor`.
+
 ## Runtime control (CLI ↔ running app)
 
 These commands append to `~/.screens/inbox.jsonl`; the desktop app drains them via a file watcher:
@@ -110,7 +176,7 @@ These commands append to `~/.screens/inbox.jsonl`; the desktop app drains them v
 | `screens reload`           | Hard-reload the embedded page                                  |
 | `screens devtools`         | Open DevTools on the embedded page                             |
 | `screens capture [<id>]`   | Capture the current (or named) screen                          |
-| `screens view <map\|split\|app>` | Switch view mode                                         |
+| `screens view <map\|split\|app\|review>` | Switch view mode (`review` = the review cockpit)  |
 | `screens account use <id>` | Switch active account (triggers auto-login)                    |
 | `screens project switch <slug>` | Switch the current project                                |
 | `screens base-url <url>`   | Change the current project's `baseUrl`                         |

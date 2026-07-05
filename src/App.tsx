@@ -4,11 +4,23 @@ import { Sidebar } from './components/Sidebar';
 import { Canvas } from './components/Canvas';
 import { Inspector } from './components/Inspector';
 import { EmbeddedBrowser } from './components/EmbeddedBrowser';
+import { ReviewPanel } from './components/Review/ReviewPanel';
 import { Check } from './components/icons';
 import { ScreensStoreProvider, useStore } from './lib/screensStore';
 import { ConsoleStoreProvider } from './lib/console/consoleStore';
 import { embed, isTauri } from './lib/tauri';
-import type { Account, ActivityEntry, Screen, ScreensConfig, ViewMode } from './types';
+import { awaitingCount } from './lib/review';
+import type {
+  Account,
+  ActivityEntry,
+  ReviewCheck,
+  ReviewTicket,
+  Screen,
+  ScreensConfig,
+  Verdict,
+  VerdictKind,
+  ViewMode,
+} from './types';
 import { usePersistedState } from './hooks/usePersistedState';
 
 interface Bounds {
@@ -46,7 +58,8 @@ const TOAST_MS = 1800;
 const MAX_ACTIVITY = 30;
 
 function Shell() {
-  const { ready, current, projects, updateProjectMeta, writeScreens, onInbox } = useStore();
+  const { ready, current, projects, updateProjectMeta, writeScreens, appendVerdict, onInbox } =
+    useStore();
 
   // Persisted view + history; baseUrl now lives in the project meta so each
   // project remembers its own server.
@@ -63,6 +76,12 @@ function Shell() {
   const groups = screensCfg?.groups ?? [];
   const screens = screensCfg?.screens ?? [];
   const edges = screensCfg?.edges ?? [];
+  const reviewTickets = current?.review?.tickets ?? [];
+  const verdicts = current?.verdicts ?? [];
+  const reviewAwaiting = useMemo(
+    () => awaitingCount(reviewTickets, verdicts),
+    [reviewTickets, verdicts],
+  );
 
   // Active account is persisted per-project so switching projects doesn't
   // wedge you on an account that doesn't exist in the new project.
@@ -94,6 +113,10 @@ function Shell() {
   const path = history[hIdx] ?? '/';
 
   const [selectedScreenId, setSelectedScreenId] = useState<string | null>(null);
+  // The review check currently loaded in the embedded browser (highlighted in
+  // the review panel). Reset when the project changes.
+  const [activeCheckId, setActiveCheckId] = useState<string | null>(null);
+  useEffect(() => setActiveCheckId(null), [slug]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   // True for `AGENT_LIVE_MS` after the last inbox command; drives the
@@ -241,6 +264,48 @@ function Shell() {
     [log, setAccountId, watchAutoLoginOutcome, projectMeta?.baseUrl],
   );
 
+  // ── Review cockpit ──────────────────────────────────────────────────────
+  // Clicking a check jumps the embedded browser to its page and, when the
+  // check names an account, switches to it (reusing the auto-login flow).
+  const goToCheck = useCallback(
+    (check: ReviewCheck) => {
+      setActiveCheckId(check.id);
+      let target: string | Screen | null = null;
+      if (check.screenId) {
+        target = screens.find((s) => s.id === check.screenId) ?? check.path ?? null;
+      } else if (check.path) {
+        target = check.path;
+      }
+      if (target) navigate(target);
+      if (check.account && check.account !== accountId) {
+        const a = accounts.find((x) => x.id === check.account);
+        if (a) pickAccount(a);
+      }
+      log('review', `open ${check.path ?? check.screenId ?? check.title}`);
+    },
+    [screens, accounts, accountId, navigate, pickAccount, log],
+  );
+
+  // Recording a verdict appends to `verdicts.jsonl` (the app is its sole
+  // writer). The agent drains it via `screens review pull`.
+  const recordVerdict = useCallback(
+    (ticket: ReviewTicket, check: ReviewCheck, kind: VerdictKind, note: string) => {
+      if (!slug) return;
+      const verdict: Verdict = {
+        ts: Date.now(),
+        ticketId: ticket.id,
+        checkId: check.id,
+        round: check.round ?? 0,
+        verdict: kind,
+        ...(note ? { note } : {}),
+      };
+      appendVerdict(slug, verdict);
+      log('review', `${kind} · ${check.title}`, kind === 'fail' ? 'warn' : 'info');
+      setToast(`${kind === 'pass' ? '✓ Passed' : kind === 'fail' ? '✗ Failed' : '~ Changes'} — ${check.title.slice(0, 40)}`);
+    },
+    [slug, appendVerdict, log],
+  );
+
   const capture = useCallback(
     async (screenIdOverride?: string) => {
       const cfg = screensCfgRef.current;
@@ -360,7 +425,9 @@ function Shell() {
         }
         case 'view': {
           const mode = args.mode as ViewMode;
-          if (mode === 'map' || mode === 'split' || mode === 'app') setView(mode);
+          if (mode === 'map' || mode === 'split' || mode === 'app' || mode === 'review') {
+            setView(mode);
+          }
           break;
         }
         case 'account.use': {
@@ -410,6 +477,7 @@ function Shell() {
       if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); setView('map'); }
       else if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); setView('split'); }
       else if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); setView('app'); }
+      else if ((e.metaKey || e.ctrlKey) && e.key === '4') { e.preventDefault(); setView('review'); }
       else if (e.key === 'Escape') setSelectedScreenId(null);
     }
     window.addEventListener('keydown', onKey);
@@ -433,6 +501,7 @@ function Shell() {
         view={view}
         setView={setView}
         agentConnected={agentLive}
+        reviewBadge={reviewAwaiting}
       />
       <Sidebar
         groups={groups}
@@ -470,8 +539,20 @@ function Shell() {
             />
           </div>
         )}
-        {view === 'split' && <div className="split-divider" />}
-        {(view === 'app' || view === 'split') && (
+        {view === 'review' && (
+          <div className="pane review-pane">
+            <ReviewPanel
+              tickets={reviewTickets}
+              verdicts={verdicts}
+              currentAccountId={accountId}
+              onGoToCheck={goToCheck}
+              onVerdict={recordVerdict}
+              activeCheckId={activeCheckId}
+            />
+          </div>
+        )}
+        {(view === 'split' || view === 'review') && <div className="split-divider" />}
+        {(view === 'app' || view === 'split' || view === 'review') && (
           <div
             className="pane"
             style={{ maxWidth: view === 'split' ? '50%' : 'none' }}

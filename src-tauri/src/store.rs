@@ -32,6 +32,11 @@ pub struct ProjectBundle {
     pub project: ProjectMeta,
     pub screens: Value,
     pub accounts: Value,
+    /// Agent-authored review tickets + checks (`review.json`). Empty default
+    /// when the project predates the review cockpit.
+    pub review: Value,
+    /// App-authored verdict log (`verdicts.jsonl`), one parsed object per line.
+    pub verdicts: Vec<Value>,
 }
 
 /// Returns the configured Screens home directory (`$SCREENS_HOME` or `~/.screens`).
@@ -55,6 +60,14 @@ pub fn registry_path() -> PathBuf {
 
 pub fn inbox_path() -> PathBuf {
     home().join("inbox.jsonl")
+}
+
+pub fn review_path(slug: &str) -> PathBuf {
+    project_dir(slug).join("review.json")
+}
+
+pub fn verdicts_path(slug: &str) -> PathBuf {
+    project_dir(slug).join("verdicts.jsonl")
 }
 
 pub fn project_dir(slug: &str) -> PathBuf {
@@ -100,7 +113,49 @@ pub fn read_project_bundle(slug: &str) -> Result<ProjectBundle, String> {
     let project = read_project_meta(slug)?;
     let screens = read_json::<Value>(&project_dir(slug).join("screens.json"))?;
     let accounts = read_json::<Value>(&project_dir(slug).join("accounts.json"))?;
-    Ok(ProjectBundle { project, screens, accounts })
+    let review = read_review(slug);
+    let verdicts = read_verdicts(slug);
+    Ok(ProjectBundle { project, screens, accounts, review, verdicts })
+}
+
+/// Read `review.json`, tolerating its absence (projects created before the
+/// review cockpit shipped) — returns an empty `{ "tickets": [] }` shape.
+pub fn read_review(slug: &str) -> Value {
+    read_json::<Value>(&review_path(slug))
+        .unwrap_or_else(|_| serde_json::json!({ "tickets": [] }))
+}
+
+/// Read the append-only verdict log, one parsed JSON object per non-blank
+/// line. Missing file or malformed lines are skipped rather than fatal — the
+/// log is advisory input to the sidebar's display overlay.
+pub fn read_verdicts(slug: &str) -> Vec<Value> {
+    let raw = match fs::read_to_string(verdicts_path(slug)) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    raw.lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .collect()
+}
+
+/// Append one verdict object as a line to `verdicts.jsonl`. The app is the sole
+/// writer of this file — mirrors how the CLI is the sole writer of `inbox.jsonl`.
+pub fn append_verdict(slug: &str, verdict: &Value) -> Result<(), String> {
+    use std::io::Write;
+    let path = verdicts_path(slug);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(io)?;
+    }
+    let line = serde_json::to_string(verdict).map_err(|e| e.to_string())?;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(io)?;
+    file.write_all(line.as_bytes()).map_err(io)?;
+    file.write_all(b"\n").map_err(io)?;
+    Ok(())
 }
 
 pub fn list_projects() -> Result<Vec<ProjectMeta>, String> {

@@ -197,6 +197,101 @@ export function emitInbox(cmd, args = {}) {
   return entry;
 }
 
+// ─── Review (agent → app) + verdicts (app → agent) ─────────────────────────
+//
+// `review.json`   is written ONLY by the CLI (the agent). Read by the app.
+// `verdicts.jsonl` is written ONLY by the app. Drained here via a line cursor.
+// This mirrors screens.json + inbox.jsonl in the opposite direction; keeping a
+// single writer per file is what lets us skip locking. See the review cockpit
+// spec.
+
+export function reviewPath(slug) {
+  return join(projectDir(slug), 'review.json');
+}
+
+export function verdictsPath(slug) {
+  return join(projectDir(slug), 'verdicts.jsonl');
+}
+
+export function verdictsCursorPath(slug) {
+  return join(projectDir(slug), 'verdicts.cursor');
+}
+
+export function readReview(slug) {
+  const path = reviewPath(slug);
+  if (!existsSync(path)) return { tickets: [] };
+  const raw = readJson(path);
+  return { tickets: raw.tickets ?? [] };
+}
+
+export function writeReview(slug, data) {
+  writeJson(reviewPath(slug), { tickets: data.tickets ?? [] });
+}
+
+/** All verdict lines ever recorded (parsed, blank/garbage lines skipped). */
+export function readVerdicts(slug) {
+  const path = verdictsPath(slug);
+  if (!existsSync(path)) return [];
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Append a verdict line. The running app is the normal writer of this file;
+ * this helper exists so the CLI (and tests) can simulate a verdict without the
+ * desktop app. Kept append-only + newline-terminated to match the app.
+ */
+export function appendVerdict(slug, verdict) {
+  appendFileSync(verdictsPath(slug), JSON.stringify(verdict) + '\n');
+  return verdict;
+}
+
+/** Read the drain cursor: number of verdict lines already pulled. */
+export function readVerdictCursor(slug) {
+  const path = verdictsCursorPath(slug);
+  if (!existsSync(path)) return 0;
+  const n = parseInt(readFileSync(path, 'utf8').trim(), 10);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+export function writeVerdictCursor(slug, n) {
+  // Cursor is agent-owned bookkeeping, not watched config — a plain write is
+  // fine, but keep it atomic for consistency with the rest of the store.
+  const path = verdictsCursorPath(slug);
+  const tmp = path + '.tmp-' + process.pid;
+  writeFileSync(tmp, String(n));
+  renameSync(tmp, path);
+}
+
+/**
+ * Return verdict lines the agent hasn't seen yet and advance the cursor.
+ * If the log was truncated below the cursor (shouldn't happen in normal use),
+ * reset and return everything.
+ */
+export function pullVerdicts(slug) {
+  const all = readVerdicts(slug);
+  let cursor = readVerdictCursor(slug);
+  if (cursor > all.length) cursor = 0;
+  const fresh = all.slice(cursor);
+  writeVerdictCursor(slug, all.length);
+  return fresh;
+}
+
+const CHECK_STATUSES = new Set(['awaiting', 'pass', 'fail', 'changes']);
+const TICKET_STATUSES = new Set(['in-progress', 'in-review', 'done']);
+
+export { CHECK_STATUSES, TICKET_STATUSES };
+
 // ─── URL parsing / utilities ───────────────────────────────────────────────
 
 /**

@@ -306,6 +306,14 @@ fn store_write_accounts(slug: String, data: serde_json::Value) -> Result<(), Str
     store::write_accounts_value(&slug, data)
 }
 
+/// Append a reviewer verdict to `verdicts.jsonl`. The app is the sole writer of
+/// this file; the agent drains it via `screens review pull`. See the review
+/// cockpit spec for the symmetric loop this closes.
+#[tauri::command]
+fn store_append_verdict(slug: String, verdict: serde_json::Value) -> Result<(), String> {
+    store::append_verdict(&slug, &verdict)
+}
+
 /// Return the absolute filesystem path of a screenshot. The TS side wraps
 /// this in Tauri's `convertFileSrc()` to produce an `asset://` URL the
 /// webview is permitted to load — `file://` URLs are blocked by Tauri 2's
@@ -385,6 +393,7 @@ pub fn run() {
             store_update_project_meta,
             store_write_screens,
             store_write_accounts,
+            store_append_verdict,
             store_screenshot_url,
         ])
         .run(tauri::generate_context!())

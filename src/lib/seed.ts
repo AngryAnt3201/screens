@@ -57,5 +57,32 @@ export function demoSeed(): ProjectBundle {
         { id: 'invited', name: 'Eli Invitee',  email: 'eli@external.test',   role: 'invited', color: 310 },
       ],
     },
+    review: {
+      tickets: [
+        {
+          id: 'RES-142',
+          title: 'Billing: annual plan toggle',
+          ref: 'https://example.atlassian.net/browse/RES-142',
+          pr: 'https://github.com/resona/web/pull/318',
+          status: 'in-review',
+          summary: 'Adds monthly/annual switch with 2-months-free badge.',
+          checks: [
+            { id: 'res-142-toggle', title: 'Annual toggle shows “2 months free” badge', path: '/app/settings/billing', screenId: 'billing', account: 'pro', detail: 'Badge appears only when Annual is selected.', status: 'awaiting', round: 0 },
+            { id: 'res-142-free', title: 'Free plan cannot select annual', path: '/app/settings/billing', screenId: 'billing', account: 'free', status: 'awaiting', round: 0 },
+          ],
+        },
+        {
+          id: 'RES-137',
+          title: 'Team invite email validation',
+          ref: 'https://example.atlassian.net/browse/RES-137',
+          status: 'in-review',
+          checks: [
+            { id: 'res-137-invalid', title: 'Invalid email shows inline error', path: '/app/invite', screenId: 'invite', account: 'owner', status: 'awaiting', round: 0 },
+            { id: 'res-137-dupe', title: 'Duplicate invite is rejected', path: '/app/invite', screenId: 'invite', account: 'owner', status: 'awaiting', round: 0 },
+          ],
+        },
+      ],
+    },
+    verdicts: [],
   };
 }

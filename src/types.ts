@@ -89,7 +89,69 @@ export interface AccountsConfig {
   accounts: Account[];
 }
 
-export type ViewMode = 'map' | 'split' | 'app';
+export type ViewMode = 'map' | 'split' | 'app' | 'review';
+
+// ─── Review cockpit ──────────────────────────────────────────────────────────
+//
+// `review.json` (agent-authored) → tickets + checks. `verdicts.jsonl`
+// (app-authored, append-only) → your rulings. See the review cockpit spec.
+
+/** A reviewer's ruling on a check. */
+export type VerdictKind = 'pass' | 'fail' | 'changes';
+
+/** Canonical status the agent records on a check (reconciled from verdicts). */
+export type CheckStatus = 'awaiting' | VerdictKind;
+
+export type TicketStatus = 'in-progress' | 'in-review' | 'done';
+
+/** Derived rollup of a ticket's checks, computed in the UI. */
+export type TicketRollup = 'empty' | 'awaiting' | 'needs-work' | 'passed';
+
+export interface ReviewCheck {
+  id: string;
+  /** What to verify. */
+  title: string;
+  /** Optional expanded "what done looks like". */
+  detail?: string;
+  /** Where to jump — path resolved against baseUrl. */
+  path?: string;
+  /** Optional alternative to `path`: a canvas screen node id. */
+  screenId?: string;
+  /** Optional account id to switch to before reviewing (triggers auto-login). */
+  account?: string;
+  /** Canonical status recorded by the agent. Display status is derived from
+   *  the verdict log (latest verdict for the current `round`). */
+  status?: CheckStatus;
+  /** Review round. Bumped by the agent on re-request so stale verdicts drop. */
+  round?: number;
+}
+
+export interface ReviewTicket {
+  id: string;
+  title: string;
+  /** External ticket URL/id (Jira/Dart), shown as a link. */
+  ref?: string;
+  /** Pull-request URL. */
+  pr?: string;
+  summary?: string;
+  status?: TicketStatus;
+  createdAt?: number;
+  checks: ReviewCheck[];
+}
+
+export interface ReviewConfig {
+  tickets: ReviewTicket[];
+}
+
+/** One line of `verdicts.jsonl`. */
+export interface Verdict {
+  ts: number;
+  ticketId: string;
+  checkId: string;
+  round: number;
+  verdict: VerdictKind;
+  note?: string;
+}
 
 export interface ActivityEntry {
   ts: string;
