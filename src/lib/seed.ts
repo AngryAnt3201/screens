@@ -65,6 +65,7 @@ export function demoSeed(): ProjectBundle {
           ref: 'https://example.atlassian.net/browse/RES-142',
           pr: 'https://github.com/resona/web/pull/318',
           status: 'in-review',
+          priority: 'High',
           summary: 'Adds monthly/annual switch with 2-months-free badge.',
           checks: [
             { id: 'res-142-toggle', title: 'Annual toggle shows “2 months free” badge', path: '/app/settings/billing', screenId: 'billing', account: 'pro', detail: 'Badge appears only when Annual is selected.', status: 'awaiting', round: 0 },
@@ -76,6 +77,7 @@ export function demoSeed(): ProjectBundle {
           title: 'Team invite email validation',
           ref: 'https://example.atlassian.net/browse/RES-137',
           status: 'in-review',
+          priority: 'Medium',
           checks: [
             { id: 'res-137-invalid', title: 'Invalid email shows inline error', path: '/app/invite', screenId: 'invite', account: 'owner', status: 'awaiting', round: 0 },
             { id: 'res-137-dupe', title: 'Duplicate invite is rejected', path: '/app/invite', screenId: 'invite', account: 'owner', status: 'awaiting', round: 0 },

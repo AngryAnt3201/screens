@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { displayStatus, latestNote, rollup, awaitingCount } from './review';
+import {
+  displayStatus,
+  latestNote,
+  rollup,
+  awaitingCount,
+  buildQueue,
+  nextAfter,
+  priorityRank,
+} from './review';
 import type { ReviewCheck, ReviewTicket, Verdict } from '../types';
 
 const check = (over: Partial<ReviewCheck> = {}): ReviewCheck => ({
@@ -91,5 +99,61 @@ describe('awaitingCount', () => {
     ];
     const vs = [verdict({ checkId: 'a' })]; // a passed → 2 remain
     expect(awaitingCount(tickets, vs)).toBe(2);
+  });
+});
+
+describe('priorityRank', () => {
+  it('orders Highest < High < Medium < Low, unset as Medium', () => {
+    expect(priorityRank('Highest')).toBeLessThan(priorityRank('High'));
+    expect(priorityRank('High')).toBeLessThan(priorityRank('Medium'));
+    expect(priorityRank('Medium')).toBeLessThan(priorityRank('Low'));
+    expect(priorityRank(undefined)).toBe(priorityRank('Medium'));
+  });
+});
+
+describe('buildQueue', () => {
+  const tickets: ReviewTicket[] = [
+    { id: 'low', title: 'L', priority: 'Low', checks: [check({ id: 'l1' })] },
+    { id: 'top', title: 'T', priority: 'Highest', checks: [check({ id: 'h1' }), check({ id: 'h2' })] },
+    { id: 'mid', title: 'M', priority: 'Medium', checks: [check({ id: 'm1' })] },
+  ];
+
+  it('orders by ticket priority, then check order', () => {
+    const q = buildQueue(tickets, [], 'all');
+    expect(q.map((i) => i.check.id)).toEqual(['h1', 'h2', 'm1', 'l1']);
+  });
+
+  it('todo filter keeps only awaiting checks', () => {
+    const vs = [verdict({ checkId: 'h1', verdict: 'pass' })];
+    const q = buildQueue(tickets, vs, 'todo');
+    expect(q.map((i) => i.check.id)).toEqual(['h2', 'm1', 'l1']);
+  });
+
+  it('needswork filter keeps only fail/changes', () => {
+    const vs = [
+      verdict({ checkId: 'h1', verdict: 'fail' }),
+      verdict({ checkId: 'm1', verdict: 'changes' }),
+      verdict({ checkId: 'l1', verdict: 'pass' }),
+    ];
+    const q = buildQueue(tickets, vs, 'needswork');
+    expect(q.map((i) => i.check.id)).toEqual(['h1', 'm1']);
+  });
+});
+
+describe('nextAfter (auto-advance)', () => {
+  const tickets: ReviewTicket[] = [
+    { id: 't', title: 'T', priority: 'Highest', checks: [check({ id: 'a' }), check({ id: 'b' }), check({ id: 'c' })] },
+  ];
+  const q = buildQueue(tickets, [], 'all');
+
+  it('returns the following item', () => {
+    expect(nextAfter(q, 'a')?.check.id).toBe('b');
+  });
+  it('falls back to the previous item at the end', () => {
+    expect(nextAfter(q, 'c')?.check.id).toBe('b');
+  });
+  it('returns null when the queue has one item', () => {
+    const one = buildQueue([{ id: 't', title: 'T', checks: [check({ id: 'a' })] }], [], 'all');
+    expect(nextAfter(one, 'a')).toBeNull();
   });
 });

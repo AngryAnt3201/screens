@@ -109,10 +109,12 @@ writer per file — never hand-edit `verdicts.jsonl`.
 
 ```bash
 # 1. One ticket group per Jira/Dart ticket (or per logical unit of work).
+#    --priority (Highest|High|Medium|Low) orders the reviewer's queue.
 screens review add-ticket DX-123 \
   --title="Billing widget on dashboard" \
   --ref="https://dexiq.atlassian.net/browse/DX-123" \
-  --pr="https://github.com/org/repo/pull/45"
+  --pr="https://github.com/org/repo/pull/45" \
+  --priority=Highest
 
 # 2. One check per atomic thing the human must verify. `--path` (or --screen)
 #    is where clicking the check jumps the embedded browser; `--account`

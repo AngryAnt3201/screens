@@ -1799,3 +1799,134 @@ input { font: inherit; color: inherit; }
 .verdict-pass.on    { background: var(--verdict-pass);    border-color: transparent; color: #fff; }
 .verdict-changes.on { background: var(--verdict-changes); border-color: transparent; color: #fff; }
 .verdict-fail.on    { background: var(--verdict-fail);    border-color: transparent; color: #fff; }
+
+/* ── Review cockpit: queue toolbar, progress, filter, hints, inbox-zero ── */
+
+.review-progress-num {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.review-progress-num strong { color: var(--text); font-weight: 600; }
+
+.review-toolbar {
+  flex-shrink: 0;
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.review-progress-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--hover);
+  overflow: hidden;
+}
+.review-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--verdict-pass);
+  transition: width 220ms ease;
+}
+.review-filter {
+  display: inline-flex;
+  align-self: flex-start;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 1px;
+}
+.review-filter button {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  transition: color 120ms, background 120ms;
+}
+.review-filter button:hover { color: var(--text-2); }
+.review-filter button.active {
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--border), var(--shadow-sm);
+}
+
+/* Priority chip on ticket header */
+.prio-chip {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  min-width: 16px;
+  text-align: center;
+}
+.prio-chip.p-highest { color: var(--verdict-fail); background: color-mix(in oklab, var(--verdict-fail) 15%, transparent); }
+.prio-chip.p-high    { color: var(--verdict-changes); background: color-mix(in oklab, var(--verdict-changes) 16%, transparent); }
+.prio-chip.p-medium  { color: var(--text-3); background: var(--hover); }
+.prio-chip.p-low     { color: var(--text-4); background: var(--hover); }
+
+/* Inbox-zero / all-caught-up */
+.review-zero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 56px 24px;
+  gap: 6px;
+}
+.review-zero-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--verdict-pass);
+  margin-bottom: 6px;
+}
+.review-zero-mark svg { width: 22px; height: 22px; }
+.review-zero-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.review-zero-sub { font-size: 12px; color: var(--text-3); }
+
+/* Keyboard hint footer */
+.review-hints {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.review-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.review-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 5px;
+  min-width: 14px;
+  text-align: center;
+}
+
+/* Stronger active ring so the queue cursor reads at a glance */
+.review-check.active {
+  background: var(--selected);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}

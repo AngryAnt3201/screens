@@ -9,7 +9,7 @@ import { Check } from './components/icons';
 import { ScreensStoreProvider, useStore } from './lib/screensStore';
 import { ConsoleStoreProvider } from './lib/console/consoleStore';
 import { embed, isTauri } from './lib/tauri';
-import { awaitingCount } from './lib/review';
+import { awaitingCount, buildQueue, nextAfter, type ReviewFilter } from './lib/review';
 import type {
   Account,
   ActivityEntry,
@@ -81,6 +81,23 @@ function Shell() {
   const reviewAwaiting = useMemo(
     () => awaitingCount(reviewTickets, verdicts),
     [reviewTickets, verdicts],
+  );
+  const [reviewFilter, setReviewFilter] = usePersistedState<ReviewFilter>(
+    'screens:reviewFilter',
+    'todo',
+  );
+  const [showReviewHelp, setShowReviewHelp] = usePersistedState<boolean>(
+    'screens:reviewHelp',
+    true,
+  );
+  // The ordered, filtered list `j`/`k` walk and auto-advance follows.
+  const reviewQueue = useMemo(
+    () => buildQueue(reviewTickets, verdicts, reviewFilter),
+    [reviewTickets, verdicts, reviewFilter],
+  );
+  const reviewTotal = useMemo(
+    () => reviewTickets.reduce((n, t) => n + (t.checks?.length ?? 0), 0),
+    [reviewTickets],
   );
 
   // Active account is persisted per-project so switching projects doesn't
@@ -265,9 +282,29 @@ function Shell() {
   );
 
   // ── Review cockpit ──────────────────────────────────────────────────────
-  // Clicking a check jumps the embedded browser to its page and, when the
-  // check names an account, switches to it (reusing the auto-login flow).
-  const goToCheck = useCallback(
+  // Keep the current queue in a ref so the (stable) keyboard handler and
+  // auto-advance read the latest ordering without re-subscribing every render.
+  const reviewQueueRef = useRef(reviewQueue);
+  useEffect(() => {
+    reviewQueueRef.current = reviewQueue;
+  }, [reviewQueue]);
+  const activeCheckIdRef = useRef(activeCheckId);
+  useEffect(() => {
+    activeCheckIdRef.current = activeCheckId;
+  }, [activeCheckId]);
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+
+  // Focus = move the highlight only (fast browsing with j/k). No navigation.
+  const focusCheck = useCallback((checkId: string) => {
+    setActiveCheckId(checkId);
+  }, []);
+
+  // Open = load the check's page in the embedded browser and, when the check
+  // names an account, switch to it (reusing the auto-login flow).
+  const openCheck = useCallback(
     (check: ReviewCheck) => {
       setActiveCheckId(check.id);
       let target: string | Screen | null = null;
@@ -287,9 +324,11 @@ function Shell() {
   );
 
   // Recording a verdict appends to `verdicts.jsonl` (the app is its sole
-  // writer). The agent drains it via `screens review pull`.
+  // writer; the agent drains it via `screens review pull`), then auto-advances
+  // to the next check in the queue and opens its page — the one-key-per-check
+  // flow. `openNext` is false when we just want to record without moving.
   const recordVerdict = useCallback(
-    (ticket: ReviewTicket, check: ReviewCheck, kind: VerdictKind, note: string) => {
+    (ticket: ReviewTicket, check: ReviewCheck, kind: VerdictKind, note: string, openNext = true) => {
       if (!slug) return;
       const verdict: Verdict = {
         ts: Date.now(),
@@ -301,9 +340,17 @@ function Shell() {
       };
       appendVerdict(slug, verdict);
       log('review', `${kind} · ${check.title}`, kind === 'fail' ? 'warn' : 'info');
-      setToast(`${kind === 'pass' ? '✓ Passed' : kind === 'fail' ? '✗ Failed' : '~ Changes'} — ${check.title.slice(0, 40)}`);
+      if (openNext) {
+        const next = nextAfter(reviewQueueRef.current, check.id);
+        if (next) {
+          openCheck(next.check);
+        } else {
+          setActiveCheckId(null);
+          setToast('✓ All caught up — nothing left to review');
+        }
+      }
     },
-    [slug, appendVerdict, log],
+    [slug, appendVerdict, log, openCheck],
   );
 
   const capture = useCallback(
@@ -484,6 +531,80 @@ function Shell() {
     return () => window.removeEventListener('keydown', onKey);
   }, [setView]);
 
+  // Review-view keyboard flow: j/k browse, Enter opens the page, p/f/c rule +
+  // auto-advance, n jumps to the note, a cycles filter, ? toggles help. Stable
+  // handler — reads live state from refs so it never re-subscribes.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (viewRef.current !== 'review') return;
+      const el = e.target as HTMLElement | null;
+      const inField = el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA';
+      if (inField) {
+        if (e.key === 'Escape') el?.blur();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return; // leave Cmd+1..4 alone
+
+      const queue = reviewQueueRef.current;
+      const idx = queue.findIndex((q) => q.check.id === activeCheckIdRef.current);
+      const current = idx >= 0 ? queue[idx] : null;
+      const move = (delta: number) => {
+        if (queue.length === 0) return;
+        const nextIdx = idx < 0 ? 0 : Math.min(queue.length - 1, Math.max(0, idx + delta));
+        const item = queue[nextIdx];
+        if (item) focusCheck(item.check.id);
+      };
+
+      switch (e.key) {
+        case 'j':
+        case 'ArrowDown':
+          e.preventDefault();
+          move(1);
+          break;
+        case 'k':
+        case 'ArrowUp':
+          e.preventDefault();
+          move(-1);
+          break;
+        case 'Enter':
+        case 'o':
+          e.preventDefault();
+          if (current) openCheck(current.check);
+          else move(1);
+          break;
+        case 'p':
+          if (current) { e.preventDefault(); recordVerdict(current.ticket, current.check, 'pass', ''); }
+          break;
+        case 'f':
+          if (current) { e.preventDefault(); recordVerdict(current.ticket, current.check, 'fail', ''); }
+          break;
+        case 'c':
+          if (current) { e.preventDefault(); recordVerdict(current.ticket, current.check, 'changes', ''); }
+          break;
+        case 'n':
+          if (current) {
+            e.preventDefault();
+            document
+              .querySelector<HTMLInputElement>(`[data-note-for="${current.check.id}"]`)
+              ?.focus();
+          }
+          break;
+        case 'a':
+          e.preventDefault();
+          setReviewFilter((f) => (f === 'todo' ? 'needswork' : f === 'needswork' ? 'all' : 'todo'));
+          break;
+        case '?':
+          e.preventDefault();
+          setShowReviewHelp((s) => !s);
+          break;
+        default:
+          break;
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusCheck, openCheck, recordVerdict, setReviewFilter, setShowReviewHelp]);
+
   // ── First-run / empty state ────────────────────────────────────────────
   if (!ready) return <BootingScreen />;
   if (projects.length === 0) return <EmptyState />;
@@ -544,10 +665,15 @@ function Shell() {
             <ReviewPanel
               tickets={reviewTickets}
               verdicts={verdicts}
+              filter={reviewFilter}
+              setFilter={setReviewFilter}
+              total={reviewTotal}
               currentAccountId={accountId}
-              onGoToCheck={goToCheck}
-              onVerdict={recordVerdict}
               activeCheckId={activeCheckId}
+              showHelp={showReviewHelp}
+              onFocus={focusCheck}
+              onOpen={openCheck}
+              onVerdict={recordVerdict}
             />
           </div>
         )}

@@ -110,6 +110,28 @@ The right pane has a Chrome-style Console docked to its right edge.
 For deep debugging (Elements, Network, Sources, …), the existing `[🔍]`
 button still pops the real native DevTools window.
 
+## Review cockpit
+
+The **Review** view (`⌘4` / `Ctrl+4`) turns a day of agent work into a few
+minutes of clicking — or rather, keypresses. An agent emits tickets + checks via
+`screens review …`; you rule each one and your verdicts flow back for the agent
+to fix and re-request.
+
+Built for speed — one key per check, mouse optional:
+
+| Key | Action |
+| --- | ------ |
+| `J` / `K` | Move through the review queue (priority-ordered, Highest first) |
+| `↵` | Open the focused check's page in the embedded browser (+ switch to its account) |
+| `P` / `C` / `F` | Pass / Changes / Fail — then **auto-advance to the next check and load its page** |
+| `N` | Jump to the note field for the focused check |
+| `A` | Cycle the filter: To review → Needs work → All |
+| `?` | Toggle the shortcut hints |
+
+The **To review** filter (default) shrinks to empty as you go, ending on an
+"All caught up" state. Verdicts are written to `verdicts.jsonl`; the agent drains
+them with `screens review pull`. See **AGENTS.md** for the full protocol.
+
 ## How the runtime control works
 
 The CLI commands `go / reload / devtools / capture / view / account use` write a JSON line to `~/.screens/inbox.jsonl`. The desktop app watches that file via the Rust `notify` crate and dispatches each command into the React UI. Latency is well under 100ms in practice.
