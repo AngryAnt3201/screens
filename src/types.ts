@@ -104,6 +104,9 @@ export type CheckStatus = 'awaiting' | VerdictKind;
 
 export type TicketStatus = 'in-progress' | 'in-review' | 'done';
 
+/** Priority label (matches Jira's set); drives the review queue order. */
+export type Priority = 'Highest' | 'High' | 'Medium' | 'Low';
+
 /** Derived rollup of a ticket's checks, computed in the UI. */
 export type TicketRollup = 'empty' | 'awaiting' | 'needs-work' | 'passed';
 
@@ -135,6 +138,8 @@ export interface ReviewTicket {
   pr?: string;
   summary?: string;
   status?: TicketStatus;
+  /** Priority — orders the review queue (Highest first). */
+  priority?: Priority;
   createdAt?: number;
   checks: ReviewCheck[];
 }

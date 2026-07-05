@@ -9,7 +9,14 @@
  * the agent re-requests review it bumps the round, so stale verdicts stop
  * matching and the check reverts to `awaiting`. Mirrors `bin/screens.mjs`.
  */
-import type { CheckStatus, ReviewCheck, ReviewTicket, TicketRollup, Verdict } from '../types';
+import type {
+  CheckStatus,
+  Priority,
+  ReviewCheck,
+  ReviewTicket,
+  TicketRollup,
+  Verdict,
+} from '../types';
 
 export function displayStatus(check: ReviewCheck, verdicts: Verdict[]): CheckStatus {
   const round = check.round ?? 0;
@@ -52,4 +59,64 @@ export function awaitingCount(tickets: ReviewTicket[], verdicts: Verdict[]): num
     }
   }
   return n;
+}
+
+// ─── Review queue (the keyboard flow) ────────────────────────────────────────
+
+export const PRIORITY_ORDER: Record<Priority, number> = {
+  Highest: 0,
+  High: 1,
+  Medium: 2,
+  Low: 3,
+};
+
+export function priorityRank(p?: Priority): number {
+  return p ? PRIORITY_ORDER[p] : 2; // unset sorts as Medium
+}
+
+/** The three review lenses. `todo` is the daily driver — it shrinks to empty. */
+export type ReviewFilter = 'todo' | 'needswork' | 'all';
+
+export interface QueueItem {
+  ticket: ReviewTicket;
+  check: ReviewCheck;
+  status: CheckStatus;
+}
+
+function matchesFilter(status: CheckStatus, filter: ReviewFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'todo') return status === 'awaiting';
+  return status === 'fail' || status === 'changes'; // needswork
+}
+
+/**
+ * Flatten tickets → an ordered, filtered list of checks. Order: ticket priority
+ * (Highest first), then the ticket's given order, then the check's given order.
+ * This is the exact sequence `j`/`k` walk and that auto-advance follows.
+ */
+export function buildQueue(
+  tickets: ReviewTicket[],
+  verdicts: Verdict[],
+  filter: ReviewFilter,
+): QueueItem[] {
+  const ordered = [...tickets].sort(
+    (a, b) => priorityRank(a.priority) - priorityRank(b.priority),
+  );
+  const out: QueueItem[] = [];
+  for (const ticket of ordered) {
+    for (const check of ticket.checks ?? []) {
+      const status = displayStatus(check, verdicts);
+      if (matchesFilter(status, filter)) out.push({ ticket, check, status });
+    }
+  }
+  return out;
+}
+
+/** The next queue item to focus after ruling `ruledCheckId`, given the queue as
+ *  it was *before* the ruling. Prefers the following item, else the previous,
+ *  else null (queue exhausted). Used for auto-advance. */
+export function nextAfter(queue: QueueItem[], ruledCheckId: string): QueueItem | null {
+  const i = queue.findIndex((q) => q.check.id === ruledCheckId);
+  if (i === -1) return queue[0] ?? null;
+  return queue[i + 1] ?? queue[i - 1] ?? null;
 }

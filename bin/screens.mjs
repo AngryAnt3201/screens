@@ -568,7 +568,7 @@ function cmdReview(args) {
 function reviewHelp() {
   console.log(`screens review <add-ticket|check|list|pull|resolve|reopen|remove-ticket|remove-check> ...
 
-  add-ticket <id> --title=<t> [--ref=<url> --pr=<url> --summary=<s> --status=<in-progress|in-review|done>]
+  add-ticket <id> --title=<t> [--ref=<url> --pr=<url> --summary=<s> --status=<in-progress|in-review|done> --priority=<Highest|High|Medium|Low>]
   check      <ticketId> --title=<t> [--path=/x | --screen=<screenId>] [--account=<id> --detail=<d> --id=<checkId>]
   list       [--json]                     Tickets + checks + current display status.
   pull       [--json]                     Print reviewer verdicts you haven't seen; advance the cursor.
@@ -602,6 +602,10 @@ function rAddTicket(args) {
   if (args.flags.status && !TICKET_STATUSES.has(args.flags.status)) {
     fail(`invalid ticket status: ${args.flags.status}`);
   }
+  const PRIORITIES = new Set(['Highest', 'High', 'Medium', 'Low']);
+  if (args.flags.priority && !PRIORITIES.has(args.flags.priority)) {
+    fail(`invalid priority: ${args.flags.priority} (Highest|High|Medium|Low)`);
+  }
   const review = readReview(slug);
   let ticket = review.tickets.find((t) => t.id === id);
   if (!ticket) {
@@ -612,6 +616,7 @@ function rAddTicket(args) {
   if (args.flags.ref != null) ticket.ref = args.flags.ref;
   if (args.flags.pr != null) ticket.pr = args.flags.pr;
   if (args.flags.summary != null) ticket.summary = args.flags.summary;
+  if (args.flags.priority != null) ticket.priority = args.flags.priority;
   ticket.status = args.flags.status ?? ticket.status ?? 'in-review';
   writeReview(slug, review);
   ok(`ticket "${id}" — ${ticket.title}`);
